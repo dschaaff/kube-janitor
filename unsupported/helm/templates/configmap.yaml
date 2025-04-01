@@ -1,0 +1,15 @@
+{{- if .Values.kubejanitor.rules }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "kubeJanitor.fullname" . }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "kubeJanitor.labels" . | nindent 4 }}
+data:
+  rules.yaml: |-
+    # example rules configuration to set TTL for arbitrary objects
+    # see https://codeberg.org/dschaaff/kube-janitor for details
+    rules:
+{{ toYaml .Values.kubejanitor.rules | indent 6 }}
+{{- end }}

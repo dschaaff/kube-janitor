@@ -1,0 +1,14 @@
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ include "kubeJanitor.fullname" . }}
+  labels:
+    {{- include "kubeJanitor.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "kubeJanitor.fullname" . }}
+subjects:
+- kind: ServiceAccount
+  name: {{ include "kubeJanitor.fullname" . }}
+  namespace: {{ .Release.Namespace }}

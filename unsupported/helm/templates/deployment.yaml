@@ -1,0 +1,57 @@
+{{- if eq .Values.kind "Deployment" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "kubeJanitor.fullname" . }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "kubeJanitor.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "kubeJanitor.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "kubeJanitor.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "kubeJanitor.fullname" . }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{ toYaml . | indent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{ toYaml . | indent 8 }}
+      {{- end }}
+      containers:
+      - name: {{ .Chart.Name }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+          {{- include "kubeJanitor.args" . | indent 10 }}
+        {{- with .Values.resources }}
+        resources:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        securityContext:
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+        {{- if .Values.kubejanitor.rules }}
+        volumeMounts:
+          - name: {{ include "kubeJanitor.fullname" . }}-volume
+            mountPath: /config
+        {{- end }}
+      {{- if .Values.kubejanitor.rules }}
+      volumes:
+        - name: {{ include "kubeJanitor.fullname" . }}-volume
+          configMap:
+            name: {{ include "kubeJanitor.fullname" . }}
+      {{- end }}
+{{- end }}

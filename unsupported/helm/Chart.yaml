@@ -1,0 +1,13 @@
+apiVersion: v1
+appVersion: 23.7.0
+description: Clean up (delete) Kubernetes resources after a configured TTL (time to live)
+name: kube-janitor
+version: 0.3.1
+home: https://codeberg.org/dschaaff/kube-janitor
+maintainers:
+  - name: dschaaff
+    email: henning@jacobs1.de
+  - name: mayppong
+    email: me@mayppong.com
+sources:
+  - https://codeberg.org/dschaaff/kube-janitor

@@ -1,0 +1,87 @@
+# -- Kube-janitor execution kind [Deployment|CronJob]
+kind: Deployment
+
+image:
+  # -- Image to use for deploying
+  repository: dschaaff/kube-janitor
+
+  # -- Image tag override (Default is Chart `appVersion`)
+  #tag: latest
+
+  # -- Image pull policy [IfNotPresent|Always|Never]
+  pullPolicy: IfNotPresent
+
+  # -- Image pull secrets to access private registries
+  pullSecrets: []
+
+# -- Kube-janitor configuration
+kubejanitor:
+  # -- Dry run mode: do not change anything, just print what would be done
+  dryRun: false
+
+  # -- Debug mode: print more information
+  debug: false
+
+  # -- Include resources for clean up
+  includeResources: []
+
+  # -- Exclude resources from clean up
+  excludeResources: ['events', 'controllerrevisions']
+
+  # -- Include namespaces for clean up
+  includeNamespaces: []
+
+  # -- Exclude namespaces from clean up
+  excludeNamespaces: ['kube-system']
+
+  # -- Loop interval in seconds
+  # Only used with Deployment kind
+  interval: 30
+
+  # -- Additional arguments to pass to the command
+  additionalArgs: []
+
+  # -- example rules configuration to set TTL for arbitrary objects
+  # see https://codeberg.org/dschaaff/kube-janitor for details
+  rules:
+    []
+    # - id: require-application-label
+    #   # remove deployments and statefulsets without a label "application"
+    #   resources:
+    #     # resources are prefixed with "XXX" to make sure they are not active by accident
+    #     # modify the rule as needed and remove the "XXX" prefix to activate
+    #     - XXXdeployments
+    #     - XXXstatefulsets
+    #   # see http://jmespath.org/specification.html
+    #   jmespath: "!(spec.template.metadata.labels.application)"
+    #   ttl: 4d
+    # - id: temporary-pr-namespaces
+    #   # delete all namespaces with a name starting with "pr-*"
+    #   resources:
+    #     # resources are prefixed with "XXX" to make sure they are not active by accident
+    #     # modify the rule as needed and remove the "XXX" prefix to activate
+    #     - XXXnamespaces
+    #   # this uses JMESPath's built-in "starts_with" function
+    #   # see http://jmespath.org/specification.html#starts-with
+    #   jmespath: "starts_with(metadata.name, 'pr-')"
+    #   ttl: 4h
+
+# -- CronJob configuration
+# Only used with CronJob kind
+cron:
+  schedule: "*/5 * * * *"
+  failedJobsHistoryLimit: 3
+  # # for the cases of cron controller interuption
+  # # https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/
+  # startingDeadlineSeconds: 300
+
+  # -- Pod restart policy [Always|OnFailure|Never]
+  restartPolicy: OnFailure
+
+# -- Container resources
+resources:
+  limits:
+    memory: 100Mi
+  requests:
+    cpu: 5m
+    memory: 100Mi

@@ -1,0 +1,48 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    application: kube-janitor
+    version: v23.7.0
+  name: kube-janitor
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      application: kube-janitor
+  template:
+    metadata:
+      labels:
+        application: kube-janitor
+        version: v23.7.0
+    spec:
+      serviceAccountName: kube-janitor
+      containers:
+      - name: janitor
+        # see https://codeberg.org/dschaaff/kube-janitor/releases
+        image: dschaaff/kube-janitor:23.7.0
+        args:
+          # dry run by default, remove to perform clean up
+          - --dry-run
+          # comment out to have less verbose logging
+          - --debug
+          # run every minute
+          - --interval=60
+          - --rules-file=/config/rules.yaml
+        resources:
+          limits:
+            memory: 100Mi
+          requests:
+            cpu: 5m
+            memory: 100Mi
+        securityContext:
+          readOnlyRootFilesystem: true
+          runAsNonRoot: true
+          runAsUser: 1000
+        volumeMounts:
+          - name: config-volume
+            mountPath: /config
+      volumes:
+      - name: config-volume
+        configMap:
+          name: kube-janitor

@@ -1,0 +1,13 @@
+kind: ClusterRole
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: {{ include "kubeJanitor.fullname" . }}
+  labels:
+    {{- include "kubeJanitor.labels" . | nindent 4 }}
+rules:
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create"]
+- apiGroups: ["*"]
+  resources: ["*"]
+  verbs: ["get", "watch", "list", "delete"]
