@@ -12,7 +12,7 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
+  build:
     name: Build Container Image
     runs-on: ubuntu-latest
     strategy:
