@@ -11,7 +11,6 @@ COPY . .
 
 ARG VERSION=dev
 ARG TARGETPLATFORM
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-X main.version=${VERSION}" -o kube-janitor ./cmd/kube-janitor
 
 RUN export GOOS=$(echo $TARGETPLATFORM | cut -d/ -f1) \
   && export GOARCH=$(echo $TARGETPLATFORM | cut -d/ -f2) \
