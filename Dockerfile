@@ -3,19 +3,20 @@ FROM public.ecr.aws/docker/library/golang:1.24-alpine3.21 AS builder
 
 WORKDIR /app
 
-# Copy go mod and sum files
 COPY go.mod go.sum ./
 
-# Download dependencies
 RUN go mod download
 
-# Copy source code
 COPY . .
 
-# Build the application
 ARG VERSION=dev
+ARG TARGETPLATFORM
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-X main.version=${VERSION}" -o kube-janitor ./cmd/kube-janitor
 
+RUN export GOOS=$(echo $TARGETPLATFORM | cut -d/ -f1) \
+  && export GOARCH=$(echo $TARGETPLATFORM | cut -d/ -f2) \
+  && echo "Building for $GOOS/$GOARCH" \
+  && CGO_ENABLED=0 go build -ldflags="-X main.version=${VERSION}" -o kube-janitor ./cmd/kube-janitor
 # Final stage
 FROM public.ecr.aws/docker/library/golang:1.24-alpine3.21
 
