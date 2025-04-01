@@ -15,10 +15,11 @@ jobs:
   build-and-push:
     name: Build Container Image
     runs-on: ubuntu-latest
-    matrix:
-      platform:
-        - linux/amd64
-        - linux/arm64
+    strategy:
+      matrix:
+        platform:
+          - linux/amd64
+          - linux/arm64
 
     permissions:
       contents: read
