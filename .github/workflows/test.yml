@@ -13,23 +13,24 @@ jobs:
     container:
       image: public.ecr.aws/docker/library/golang:alpine
     steps:
-      - name: Install
+      - name: Install Git
         run: apk add --no-cache git
 
-      - name: Checkout code
+      - name: Checkout Code
         uses: actions/checkout@v3
 
-      - name: Install build dependencies
+      - name: Install Build Dependencies
         run: apk add --no-cache git gcc musl-dev
 
-      - name: Get dependencies
+      - name: Go Mod
         run: go mod download
 
-      - name: Run tests
+      - name: Test
         run: go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
 
-      - name: Upload coverage to Codecov
+      - name: Upload Coverage to Codecov
         uses: codecov/codecov-action@v3
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           file: ./coverage.txt
           fail_ci_if_error: false
