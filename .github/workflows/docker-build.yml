@@ -14,7 +14,6 @@ env:
 jobs:
   build:
     name: Build Container Image
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         platform:
