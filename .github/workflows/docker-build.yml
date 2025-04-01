@@ -13,11 +13,8 @@ env:
 
 jobs:
   build-and-push:
-    name: Build with Alpine
+    name: Build Container Image
     runs-on: ubuntu-latest
-    container:
-      image: public.ecr.aws/docker/library/docker:20.10-alpine
-      options: --privileged
 
     permissions:
       contents: read
