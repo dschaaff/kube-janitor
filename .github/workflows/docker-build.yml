@@ -141,7 +141,7 @@ jobs:
         run: |
           echo "timestamp=$(date -u +"%Y-%m-%dT%H:%M:%SZ")" >> $GITHUB_OUTPUT
 
-      - name: Create manifest list and pushs
+      - name: Create manifest list and push
         working-directory: /tmp/digests
         id: manifest-annotate
         continue-on-error: true
