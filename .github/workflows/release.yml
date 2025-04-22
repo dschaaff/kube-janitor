@@ -10,6 +10,18 @@ permissions:
   packages: write
 
 jobs:
+  wait-for-docker:
+    name: Wait for Docker Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Docker Build Workflow
+        uses: lewagon/wait-on-check-action@v1.3.1
+        with:
+          ref: ${{ github.ref }}
+          check-name: 'Merge Docker manifests'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10
+
   goreleaser:
     runs-on: ubuntu-latest
     steps:
@@ -45,33 +57,33 @@ jobs:
         run: |
           VERSION_TAG="${GITHUB_REF#refs/tags/}"
           SHORT_SHA="${{ steps.get_commit.outputs.SHORT_COMMIT }}"
-          
+
           # Use the repository name from GitHub context
           SOURCE_IMAGE="ghcr.io/${{ github.repository }}:sha-${SHORT_SHA}"
-          
+
           echo "Checking if source image exists: ${SOURCE_IMAGE}"
           if ! docker buildx imagetools inspect "${SOURCE_IMAGE}" &>/dev/null; then
             echo "Warning: Source image ${SOURCE_IMAGE} does not exist"
             echo "Trying with just the short SHA tag..."
             SOURCE_IMAGE="ghcr.io/${{ github.repository }}:${SHORT_SHA}"
-            
+
             if ! docker buildx imagetools inspect "${SOURCE_IMAGE}" &>/dev/null; then
               echo "Error: Source image ${SOURCE_IMAGE} does not exist either"
               echo "Make sure your CI workflow has built and pushed this image"
               exit 1
             fi
           fi
-          
+
           echo "Tagging image with version: ${VERSION_TAG}"
           docker buildx imagetools create \
             --tag "ghcr.io/${{ github.repository }}:${VERSION_TAG}" \
             "${SOURCE_IMAGE}" || { echo "Failed to tag with version"; exit 1; }
-            
+
           echo "Tagging image as latest"
           docker buildx imagetools create \
             --tag "ghcr.io/${{ github.repository }}:latest" \
             "${SOURCE_IMAGE}" || { echo "Failed to tag as latest"; exit 1; }
-          
+
           echo "Successfully tagged ${SOURCE_IMAGE} as version ${VERSION_TAG} and latest"
 
       - name: Run GoReleaser
