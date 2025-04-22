@@ -16,7 +16,7 @@ import (
     corev1 "k8s.io/api/core/v1"
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
     "k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-    "k8s.io/apimachinery/pkg/runtime/schema" 
+    "k8s.io/apimachinery/pkg/runtime/schema"
     "k8s.io/client-go/dynamic"
     "k8s.io/client-go/kubernetes"
     "k8s.io/client-go/rest"
@@ -72,7 +72,7 @@ func getDynamicClient() (dynamic.Interface, error) {
                 kubeconfigPath = filepath.Join(homeDir, ".kube", "config")
             }
         }
-        
+
         config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
         if err != nil {
             return nil, fmt.Errorf("failed to create config: %v (try setting KUBECONFIG environment variable)", err)
@@ -96,8 +96,8 @@ func (j *Janitor) sendDeleteNotification(ctx context.Context, resource metav1.Ob
         if u, ok := resource.(*unstructured.Unstructured); ok {
             kind = u.GetKind()
         }
-        
-        log.Printf("**DRY-RUN**: Would send delete notification for %s %s/%s", 
+
+        log.Printf("**DRY-RUN**: Would send delete notification for %s %s/%s",
             kind,
             resource.GetNamespace(),
             resource.GetName())
@@ -116,13 +116,13 @@ func (j *Janitor) sendDeleteNotification(ctx context.Context, resource metav1.Ob
     // Create notification message
     contextName := os.Getenv("CONTEXT_NAME")
     formattedTime := expiryTime.Format(time.RFC3339)
-    
+
     // Get kind using type assertion
     kind := "Unknown"
     if u, ok := resource.(*unstructured.Unstructured); ok {
         kind = u.GetKind()
     }
-    
+
     message := fmt.Sprintf("%s%s %s/%s will be deleted at %s (%s)",
         func() string {
             if contextName != "" {
@@ -167,19 +167,19 @@ func (j *Janitor) debugLog(format string, args ...interface{}) {
 // infoLog logs a message at the info level (always visible unless quiet mode is enabled)
 func (j *Janitor) infoLog(format string, args ...interface{}) {
     if !j.config.Quiet {
-        log.Printf(format, args...)
+		log.Printf("INFO: " +format, args...)
     }
 }
 
 // CleanUp performs one cleanup run
 func (j *Janitor) CleanUp(ctx context.Context) error {
     j.debugLog("Starting cleanup run")
-    
+
     resourceTypes, err := GetResourceTypes(j.client)
     if err != nil {
         return fmt.Errorf("failed to get resource types: %v", err)
     }
-    
+
     j.debugLog("Found %d resource types", len(resourceTypes))
 
     // Create maps for tracking
@@ -224,11 +224,11 @@ func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType Resource
     // Process namespaced resources
     if resourceType.Namespaced {
         j.debugLog("Processing namespaced resources for type: %s", resourceType.Kind)
-        
+
         // Collect all resources from all namespaces first
         var allResources []metav1.Object
         var resourcesMutex sync.Mutex
-        
+
         for _, ns := range namespaces.Items {
             // Skip excluded namespaces
             if !j.shouldProcessNamespace(ns.Name) {
@@ -243,15 +243,15 @@ func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType Resource
                 continue
             }
             j.debugLog("Found %d resources of type %s in namespace %s", len(resources), resourceType.Kind, ns.Name)
-            
+
             resourcesMutex.Lock()
             allResources = append(allResources, resources...)
             resourcesMutex.Unlock()
         }
-        
+
         // Process resources in parallel
         j.processResourcesInParallel(ctx, allResources, counter, alreadySeen)
-        
+
     } else if j.config.IncludeClusterResources {
         // Process cluster-scoped resources if enabled
         j.debugLog("Processing cluster-scoped resources for type: %s", resourceType.Kind)
@@ -378,7 +378,7 @@ func getKubeClient() (kubernetes.Interface, error) {
                 kubeconfigPath = filepath.Join(homeDir, ".kube", "config")
             }
         }
-        
+
         config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
         if err != nil {
             return nil, fmt.Errorf("failed to create config: %v (try setting KUBECONFIG environment variable)", err)
@@ -404,7 +404,7 @@ func (j *Janitor) createEvent(ctx context.Context, resource metav1.Object, messa
     // Get kind and API version using type assertion
     kind := "Unknown"
     apiVersion := "v1"
-    
+
     if u, ok := resource.(*unstructured.Unstructured); ok {
         kind = u.GetKind()
         apiVersion = u.GetAPIVersion()
@@ -548,7 +548,7 @@ func (j *Janitor) handleTTL(ctx context.Context, obj metav1.Object, counter map[
     }
 
     j.infoLog("Resource %s/%s has TTL annotation: %s", obj.GetNamespace(), obj.GetName(), ttl)
-    
+
     // Parse TTL
     ttlDuration, err := ParseTTL(ttl)
     if err != nil {
@@ -590,7 +590,7 @@ func (j *Janitor) handleTTL(ctx context.Context, obj metav1.Object, counter map[
         if u, ok := obj.(*unstructured.Unstructured); ok {
             kind = u.GetKind()
         }
-        
+
         message := fmt.Sprintf("%s %s/%s expired on %s and will be deleted (TTL %s from %s)",
             kind,
             obj.GetNamespace(),
@@ -647,8 +647,8 @@ func (j *Janitor) handleRules(ctx context.Context, obj metav1.Object, counter ma
         if u, ok := obj.(*unstructured.Unstructured); ok {
             kind = u.GetKind()
         }
-        
-        log.Printf("Warning: failed to get context for %s %s/%s: %v", 
+
+        log.Printf("Warning: failed to get context for %s %s/%s: %v",
             kind, obj.GetNamespace(), obj.GetName(), err)
         context = make(map[string]interface{})
     }
@@ -692,19 +692,19 @@ func (j *Janitor) handleRules(ctx context.Context, obj metav1.Object, counter ma
 
             // Calculate expiry time
             expiryTime := deploymentTime.Add(ttlDuration)
-            j.infoLog("Resource %s/%s expires at: %s based on rule %s", 
+            j.infoLog("Resource %s/%s expires at: %s based on rule %s",
                 obj.GetNamespace(), obj.GetName(), expiryTime, rule.ID)
 
             // Check if resource has expired
             if time.Now().After(expiryTime) {
-                j.infoLog("Resource %s/%s has expired based on rule %s, will be deleted", 
+                j.infoLog("Resource %s/%s has expired based on rule %s, will be deleted",
                     obj.GetNamespace(), obj.GetName(), rule.ID)
                 // Get kind using type assertion
                 kind := "Unknown"
                 if u, ok := obj.(*unstructured.Unstructured); ok {
                     kind = u.GetKind()
                 }
-                
+
                 message := fmt.Sprintf("%s %s/%s expired on %s and will be deleted (rule %s, TTL %s from %s)",
                     kind,
                     obj.GetNamespace(),
@@ -728,17 +728,17 @@ func (j *Janitor) handleRules(ctx context.Context, obj metav1.Object, counter ma
             } else if j.config.DeleteNotification > 0 {
                 // Send notification if configured and not already notified
                 notificationTime := expiryTime.Add(-time.Duration(j.config.DeleteNotification) * time.Second)
-                j.debugLog("Rule %s notification time for resource %s/%s: %s", 
+                j.debugLog("Rule %s notification time for resource %s/%s: %s",
                     rule.ID, obj.GetNamespace(), obj.GetName(), notificationTime)
                 if time.Now().After(notificationTime) && !j.wasNotified(obj) {
-                    j.infoLog("Sending delete notification for resource %s/%s based on rule %s", 
+                    j.infoLog("Sending delete notification for resource %s/%s based on rule %s",
                         obj.GetNamespace(), obj.GetName(), rule.ID)
                     if err := j.sendDeleteNotification(ctx, obj, fmt.Sprintf("rule %s, TTL %s from %s", rule.ID, rule.TTL, deploymentTime.Format(time.RFC3339)), expiryTime); err != nil {
                         return fmt.Errorf("failed to send delete notification: %v", err)
                     }
                 }
             }
-            
+
             // Only apply the first matching rule
             break
         }
@@ -775,8 +775,8 @@ func (j *Janitor) deleteResource(ctx context.Context, obj metav1.Object) error {
         if u, ok := obj.(*unstructured.Unstructured); ok {
             kind = u.GetKind()
         }
-        
-        log.Printf("**DRY-RUN**: Would delete %s %s/%s", 
+
+        log.Printf("**DRY-RUN**: Would delete %s %s/%s",
             kind,
             obj.GetNamespace(),
             obj.GetName())
@@ -786,7 +786,7 @@ func (j *Janitor) deleteResource(ctx context.Context, obj metav1.Object) error {
 
     // Get GVR using type assertion
     var gvr schema.GroupVersionResource
-    
+
     if u, ok := obj.(*unstructured.Unstructured); ok {
         gvk := u.GroupVersionKind()
         gvr = schema.GroupVersionResource{
@@ -849,26 +849,26 @@ func (j *Janitor) handleResource(ctx context.Context, resource metav1.Object, co
     if u, ok := resource.(*unstructured.Unstructured); ok {
         kind = u.GetKind()
     }
-    
+
     j.debugLog("Processing resource: %s/%s/%s", kind, resource.GetNamespace(), resource.GetName())
-    
+
     if !j.matchesResourceFilter(resource) {
-        j.debugLog("Resource %s/%s/%s does not match filters, skipping", 
+        j.debugLog("Resource %s/%s/%s does not match filters, skipping",
             kind, resource.GetNamespace(), resource.GetName())
         return nil
     }
 
     // Increment counter
     counter["resources-processed"]++
-    
-    j.debugLog("Checking TTL for resource: %s/%s/%s", 
+
+    j.debugLog("Checking TTL for resource: %s/%s/%s",
         kind, resource.GetNamespace(), resource.GetName())
 
     if err := j.handleTTL(ctx, resource, counter); err != nil {
         return fmt.Errorf("failed to handle TTL: %v", err)
     }
 
-    j.debugLog("Checking expiry for resource: %s/%s/%s", 
+    j.debugLog("Checking expiry for resource: %s/%s/%s",
         kind, resource.GetNamespace(), resource.GetName())
     if err := j.handleExpiry(ctx, resource, counter); err != nil {
         return fmt.Errorf("failed to handle expiry: %v", err)
@@ -878,7 +878,7 @@ func (j *Janitor) handleResource(ctx context.Context, resource metav1.Object, co
 }
 
 func (j *Janitor) cleanupNamespaces(ctx context.Context, counter map[string]int) error {
-    if !stringInSlice("namespaces", j.config.IncludeResources) && 
+    if !stringInSlice("namespaces", j.config.IncludeResources) &&
        !stringInSlice("all", j.config.IncludeResources) {
         j.debugLog("Namespaces not included in resources to process, skipping")
         return nil
@@ -901,7 +901,7 @@ func (j *Janitor) cleanupNamespaces(ctx context.Context, counter map[string]int)
             j.debugLog("Namespace %s does not match filters, skipping", ns.Name)
         }
     }
-    
+
     // Process namespaces in parallel
     j.processResourcesInParallel(ctx, filteredNamespaces, counter, make(map[string]bool))
 
@@ -913,31 +913,31 @@ func (j *Janitor) processResourcesInParallel(ctx context.Context, resources []me
     if len(resources) == 0 {
         return
     }
-    
+
     // Use a mutex to protect alreadySeen map
     var alreadySeenMutex sync.Mutex
-    
+
     // Create a wait group to wait for all workers to finish
     var wg sync.WaitGroup
-    
+
     // Create a channel for resources
     resourceCh := make(chan metav1.Object, len(resources))
-    
+
     // Determine number of workers
     numWorkers := j.config.Parallelism
     if numWorkers <= 0 {
         numWorkers = 1
     }
-    
+
     j.debugLog("Processing %d resources with %d workers", len(resources), numWorkers)
-    
+
     // Start workers
     for i := 0; i < numWorkers; i++ {
         wg.Add(1)
         go func(workerID int) {
             defer wg.Done()
             j.debugLog("Worker %d started", workerID)
-            
+
             for resource := range resourceCh {
                 // Check if already processed
                 alreadySeenMutex.Lock()
@@ -951,29 +951,29 @@ func (j *Janitor) processResourcesInParallel(ctx context.Context, resources []me
                     alreadySeen[key] = true
                 }
                 alreadySeenMutex.Unlock()
-                
+
                 if seen {
                     j.debugLog("Worker %d: Skipping already processed resource: %s", workerID, key)
                     continue
                 }
-                
+
                 j.debugLog("Worker %d: Processing resource: %s", workerID, key)
-                
+
                 if err := j.handleResource(ctx, resource, counter, alreadySeen); err != nil {
-                    log.Printf("Worker %d: Error handling %s %s/%s: %v", 
+                    log.Printf("Worker %d: Error handling %s %s/%s: %v",
                         workerID, kind, resource.GetNamespace(), resource.GetName(), err)
                 }
             }
-            
+
             j.debugLog("Worker %d finished", workerID)
         }(i)
     }
-    
+
     // Send resources to channel
     for _, resource := range resources {
         resourceCh <- resource
     }
-    
+
     // Close channel and wait for workers to finish
     close(resourceCh)
     wg.Wait()
@@ -983,13 +983,13 @@ func (j *Janitor) logCleanupSummary(counter map[string]int) {
     if j.config.Quiet {
         return
     }
-    
+
     var stats []string
     for k, v := range counter {
         stats = append(stats, fmt.Sprintf("%s=%d", k, v))
     }
     log.Printf("Clean up run completed: %s", strings.Join(stats, ", "))
-    
+
     if j.debug {
         j.debugLog("Detailed counter values:")
         for k, v := range counter {
@@ -1005,7 +1005,7 @@ func (j *Janitor) matchesResourceFilter(obj metav1.Object) bool {
     if u, ok := obj.(*unstructured.Unstructured); ok {
         kind = u.GetKind()
     }
-    
+
     namespace := obj.GetNamespace()
     name := obj.GetName()
 
