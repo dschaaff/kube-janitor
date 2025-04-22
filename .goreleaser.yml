@@ -1,3 +1,6 @@
+# This is a GoReleaser configuration file for kube-janitor
+version: 2
+
 project_name: kube-janitor
 
 before:
@@ -21,7 +24,8 @@ builds:
       - -s -w -X main.version={{.Version}}
 
 archives:
-  - format: tar.gz
+  - id: default
+    format: tar.gz
     name_template: >-
       {{ .ProjectName }}_
       {{- title .Os }}_
