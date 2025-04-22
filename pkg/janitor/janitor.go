@@ -164,6 +164,13 @@ func (j *Janitor) debugLog(format string, args ...interface{}) {
     }
 }
 
+// infoLog logs a message at the info level (always visible unless quiet mode is enabled)
+func (j *Janitor) infoLog(format string, args ...interface{}) {
+    if !j.config.Quiet {
+        log.Printf(format, args...)
+    }
+}
+
 // CleanUp performs one cleanup run
 func (j *Janitor) CleanUp(ctx context.Context) error {
     j.debugLog("Starting cleanup run")
@@ -540,7 +547,7 @@ func (j *Janitor) handleTTL(ctx context.Context, obj metav1.Object, counter map[
         return j.handleRules(ctx, obj, counter)
     }
 
-    j.debugLog("Resource %s/%s has TTL annotation: %s", obj.GetNamespace(), obj.GetName(), ttl)
+    j.infoLog("Resource %s/%s has TTL annotation: %s", obj.GetNamespace(), obj.GetName(), ttl)
     
     // Parse TTL
     ttlDuration, err := ParseTTL(ttl)
@@ -573,11 +580,11 @@ func (j *Janitor) handleTTL(ctx context.Context, obj metav1.Object, counter map[
 
     // Calculate expiry time
     expiryTime := deploymentTime.Add(ttlDuration)
-    j.debugLog("Resource %s/%s expires at: %s", obj.GetNamespace(), obj.GetName(), expiryTime)
+    j.infoLog("Resource %s/%s expires at: %s", obj.GetNamespace(), obj.GetName(), expiryTime)
 
     // Check if resource has expired
     if time.Now().After(expiryTime) {
-        j.debugLog("Resource %s/%s has expired, will be deleted", obj.GetNamespace(), obj.GetName())
+        j.infoLog("Resource %s/%s has expired, will be deleted", obj.GetNamespace(), obj.GetName())
         // Get kind using type assertion
         kind := "Unknown"
         if u, ok := obj.(*unstructured.Unstructured); ok {
@@ -607,7 +614,7 @@ func (j *Janitor) handleTTL(ctx context.Context, obj metav1.Object, counter map[
         notificationTime := expiryTime.Add(-time.Duration(j.config.DeleteNotification) * time.Second)
         j.debugLog("Resource %s/%s notification time: %s", obj.GetNamespace(), obj.GetName(), notificationTime)
         if time.Now().After(notificationTime) && !j.wasNotified(obj) {
-            j.debugLog("Sending delete notification for resource %s/%s", obj.GetNamespace(), obj.GetName())
+            j.infoLog("Sending delete notification for resource %s/%s", obj.GetNamespace(), obj.GetName())
             if err := j.sendDeleteNotification(ctx, obj, fmt.Sprintf("TTL %s from %s", ttl, deploymentTime.Format(time.RFC3339)), expiryTime); err != nil {
                 return fmt.Errorf("failed to send delete notification: %v", err)
             }
@@ -650,7 +657,7 @@ func (j *Janitor) handleRules(ctx context.Context, obj metav1.Object, counter ma
     for _, rule := range j.config.Rules {
         j.debugLog("Checking rule %s for resource %s/%s", rule.ID, obj.GetNamespace(), obj.GetName())
         if rule.Matches(resourceMap, context) {
-            j.debugLog("Rule %s matched resource %s/%s", rule.ID, obj.GetNamespace(), obj.GetName())
+            j.infoLog("Rule %s matched resource %s/%s", rule.ID, obj.GetNamespace(), obj.GetName())
             // Parse TTL
             ttlDuration, err := ParseTTL(rule.TTL)
             if err != nil {
@@ -685,12 +692,12 @@ func (j *Janitor) handleRules(ctx context.Context, obj metav1.Object, counter ma
 
             // Calculate expiry time
             expiryTime := deploymentTime.Add(ttlDuration)
-            j.debugLog("Resource %s/%s expires at: %s based on rule %s", 
+            j.infoLog("Resource %s/%s expires at: %s based on rule %s", 
                 obj.GetNamespace(), obj.GetName(), expiryTime, rule.ID)
 
             // Check if resource has expired
             if time.Now().After(expiryTime) {
-                j.debugLog("Resource %s/%s has expired based on rule %s, will be deleted", 
+                j.infoLog("Resource %s/%s has expired based on rule %s, will be deleted", 
                     obj.GetNamespace(), obj.GetName(), rule.ID)
                 // Get kind using type assertion
                 kind := "Unknown"
@@ -724,7 +731,7 @@ func (j *Janitor) handleRules(ctx context.Context, obj metav1.Object, counter ma
                 j.debugLog("Rule %s notification time for resource %s/%s: %s", 
                     rule.ID, obj.GetNamespace(), obj.GetName(), notificationTime)
                 if time.Now().After(notificationTime) && !j.wasNotified(obj) {
-                    j.debugLog("Sending delete notification for resource %s/%s based on rule %s", 
+                    j.infoLog("Sending delete notification for resource %s/%s based on rule %s", 
                         obj.GetNamespace(), obj.GetName(), rule.ID)
                     if err := j.sendDeleteNotification(ctx, obj, fmt.Sprintf("rule %s, TTL %s from %s", rule.ID, rule.TTL, deploymentTime.Format(time.RFC3339)), expiryTime); err != nil {
                         return fmt.Errorf("failed to send delete notification: %v", err)
@@ -801,13 +808,13 @@ func (j *Janitor) deleteResource(ctx context.Context, obj metav1.Object) error {
     }
 
     if obj.GetNamespace() != "" {
-        j.debugLog("Deleting namespaced resource %s/%s", obj.GetNamespace(), obj.GetName())
+        j.infoLog("Deleting namespaced resource %s/%s", obj.GetNamespace(), obj.GetName())
         err := j.dynamicClient.Resource(gvr).Namespace(obj.GetNamespace()).Delete(ctx, obj.GetName(), deleteOptions)
         if err != nil {
             return fmt.Errorf("failed to delete resource: %v", err)
         }
     } else {
-        j.debugLog("Deleting cluster-scoped resource %s", obj.GetName())
+        j.infoLog("Deleting cluster-scoped resource %s", obj.GetName())
         err := j.dynamicClient.Resource(gvr).Delete(ctx, obj.GetName(), deleteOptions)
         if err != nil {
             return fmt.Errorf("failed to delete resource: %v", err)
@@ -815,7 +822,7 @@ func (j *Janitor) deleteResource(ctx context.Context, obj metav1.Object) error {
     }
 
     if j.config.WaitAfterDelete > 0 {
-        j.debugLog("Waiting %d seconds after delete", j.config.WaitAfterDelete)
+        j.infoLog("Waiting %d seconds after delete", j.config.WaitAfterDelete)
         time.Sleep(time.Duration(j.config.WaitAfterDelete) * time.Second)
     }
 
