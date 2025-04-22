@@ -484,9 +484,9 @@ func (j *Janitor) handleExpiry(ctx context.Context, obj metav1.Object, counter m
         }
 
         j.counterMutex.Lock()
+        defer j.counterMutex.Unlock()
         resourceType := fmt.Sprintf("%ss", strings.ToLower(kind))
         counter[resourceType+"-deleted"]++
-        j.counterMutex.Unlock()
     } else if j.config.DeleteNotification > 0 {
         notificationTime := expiryTime.Add(-time.Duration(j.config.DeleteNotification) * time.Second)
         if time.Now().After(notificationTime) && !j.wasNotified(obj) {
@@ -726,9 +726,9 @@ func (j *Janitor) handleRules(ctx context.Context, obj metav1.Object, counter ma
                 }
 
                 j.counterMutex.Lock()
+                defer j.counterMutex.Unlock()
                 resourceType := fmt.Sprintf("%ss", strings.ToLower(kind))
                 counter[resourceType+"-deleted"]++
-                j.counterMutex.Unlock()
                 return nil
             } else if j.config.DeleteNotification > 0 {
                 // Send notification if configured and not already notified
@@ -865,8 +865,8 @@ func (j *Janitor) handleResource(ctx context.Context, resource metav1.Object, co
 
     // Increment counter with mutex protection
     j.counterMutex.Lock()
+    defer j.counterMutex.Unlock()
     counter["resources-processed"]++
-    j.counterMutex.Unlock()
 
     j.debugLog("Checking TTL for resource: %s/%s/%s",
         kind, resource.GetNamespace(), resource.GetName())
@@ -992,21 +992,20 @@ func (j *Janitor) logCleanupSummary(counter map[string]int) {
     }
 
     j.counterMutex.Lock()
+    defer j.counterMutex.Unlock()
+    
     var stats []string
     for k, v := range counter {
         stats = append(stats, fmt.Sprintf("%s=%d", k, v))
     }
-    j.counterMutex.Unlock()
     
     log.Printf("Clean up run completed: %s", strings.Join(stats, ", "))
 
     if j.debug {
         j.debugLog("Detailed counter values:")
-        j.counterMutex.Lock()
         for k, v := range counter {
             j.debugLog("  %s: %d", k, v)
         }
-        j.counterMutex.Unlock()
     }
 }
 
