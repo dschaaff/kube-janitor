@@ -304,6 +304,32 @@ any StatefulSet volumeClaimTemplate.
 
 : TTL value (e.g. `15m`) to apply to the object if the rule matches.
 
+## Releases
+
+This project uses [GoReleaser](https://goreleaser.com/) to manage releases.
+
+### Creating a new release
+
+1. Make sure all your changes are committed and pushed to the main branch
+2. Create and push a new tag:
+   ```bash
+   git tag -a v1.0.0 -m "Release v1.0.0"
+   git push origin v1.0.0
+   ```
+3. The release workflow will automatically:
+   - Create a GitHub release with binaries for multiple platforms
+   - Generate a changelog based on commit messages
+   - Tag the existing Docker images with the version number
+
+### Commit message format
+
+To generate better changelogs, please use conventional commit messages:
+
+- `feat: add new feature` (for new features)
+- `fix: resolve issue with X` (for bug fixes)
+- `docs: update README` (for documentation)
+- `chore: update dependencies` (for maintenance tasks)
+
 ## Contributing
 
 Easiest way to contribute is to provide feedback! We would love to hear
