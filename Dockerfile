@@ -10,12 +10,14 @@ RUN go mod download
 COPY . .
 
 ARG VERSION=dev
+ARG BUILD_DATE=unknown
+ARG GIT_COMMIT=unknown
 ARG TARGETPLATFORM
 
 RUN export GOOS=$(echo $TARGETPLATFORM | cut -d/ -f1) \
   && export GOARCH=$(echo $TARGETPLATFORM | cut -d/ -f2) \
   && echo "Building for $GOOS/$GOARCH" \
-  && CGO_ENABLED=0 go build -ldflags="-X main.version=${VERSION}" -o kube-janitor ./cmd/kube-janitor
+  && CGO_ENABLED=0 go build -ldflags="-X main.version=${VERSION} -X main.buildDate=${BUILD_DATE} -X main.gitCommit=${GIT_COMMIT}" -o kube-janitor ./cmd/kube-janitor
 # Final stage
 FROM public.ecr.aws/docker/library/golang:1.24-alpine3.21
 

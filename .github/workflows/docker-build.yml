@@ -58,6 +58,10 @@ jobs:
             type=sha,format=short
             type=ref,event=pr
 
+      - name: Get timestamp
+        id: timestamp
+        run: echo "timestamp=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_OUTPUT
+
       - name: Build and push by digest
         id: build
         uses: docker/build-push-action@v6
@@ -71,6 +75,8 @@ jobs:
           cache-to: type=gha,scope=${{ github.repository }}-${{ github.ref_name }}-${{ matrix.platform }}
           build-args: |
             VERSION=${{ github.ref_name }}
+            BUILD_DATE=${{ steps.timestamp.outputs.timestamp }}
+            GIT_COMMIT=${{ github.sha }}
 
       - name: Export digest
         run: |
