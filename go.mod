@@ -1,6 +1,6 @@
 module github.com/dschaaff/kube-janitor
 
-go 1.21
+go 1.24
 
 require (
 	github.com/jmespath/go-jmespath v0.4.0
