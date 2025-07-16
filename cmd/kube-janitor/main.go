@@ -28,6 +28,9 @@ func main() {
     
     flag.Parse() // Parse flags after they've been added to flag.CommandLine
     
+    // Parse the comma-separated string flags after flag.Parse()
+    config.ParseStringFlags()
+    
     // Set default parallelism if not specified
     if config.Parallelism == 0 {
         config.Parallelism = runtime.NumCPU()
