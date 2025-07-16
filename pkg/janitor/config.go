@@ -34,6 +34,12 @@ type Config struct {
 	LogFormat             string
 	Parallelism           int
 
+	// Internal string fields for flag parsing
+	includeResourcesStr   string
+	excludeResourcesStr   string
+	includeNamespacesStr  string
+	excludeNamespacesStr  string
+
 	// Additional configuration
 	Rules               []Rule
 	ResourceContextHook ResourceContextHook
@@ -64,24 +70,25 @@ func (c *Config) AddFlags(fs *flag.FlagSet) {
 	fs.IntVar(&c.DeleteNotification, "delete-notification", 0, "Send an event seconds before to warn of the deletion")
 	
 	// Use custom variables to handle comma-separated lists
-	var includeResources, excludeResources, includeNamespaces, excludeNamespaces string
-	fs.StringVar(&includeResources, "include-resources", getEnvOrDefault("INCLUDE_RESOURCES", "all"), "Resources to consider for clean up (comma-separated)")
-	fs.StringVar(&excludeResources, "exclude-resources", getEnvOrDefault("EXCLUDE_RESOURCES", defaultExcludeResources), "Resources to exclude from clean up (comma-separated)")
-	fs.StringVar(&includeNamespaces, "include-namespaces", getEnvOrDefault("INCLUDE_NAMESPACES", "all"), "Include namespaces for clean up (comma-separated)")
-	fs.StringVar(&excludeNamespaces, "exclude-namespaces", getEnvOrDefault("EXCLUDE_NAMESPACES", defaultExcludeNamespaces), "Exclude namespaces from clean up (comma-separated)")
+	fs.StringVar(&c.includeResourcesStr, "include-resources", getEnvOrDefault("INCLUDE_RESOURCES", "all"), "Resources to consider for clean up (comma-separated)")
+	fs.StringVar(&c.excludeResourcesStr, "exclude-resources", getEnvOrDefault("EXCLUDE_RESOURCES", defaultExcludeResources), "Resources to exclude from clean up (comma-separated)")
+	fs.StringVar(&c.includeNamespacesStr, "include-namespaces", getEnvOrDefault("INCLUDE_NAMESPACES", "all"), "Include namespaces for clean up (comma-separated)")
+	fs.StringVar(&c.excludeNamespacesStr, "exclude-namespaces", getEnvOrDefault("EXCLUDE_NAMESPACES", defaultExcludeNamespaces), "Exclude namespaces from clean up (comma-separated)")
 	
 	fs.StringVar(&c.RulesFile, "rules-file", os.Getenv("RULES_FILE"), "Load TTL rules from given file path")
 	fs.StringVar(&c.DeploymentTimeAnnotation, "deployment-time-annotation", "", "Annotation that contains a resource's last deployment time")
 	fs.BoolVar(&c.IncludeClusterResources, "include-cluster-resources", false, "Include cluster scoped resources")
 	fs.StringVar(&c.LogFormat, "log-format", defaultLogFormat, "Set custom log format")
 	fs.IntVar(&c.Parallelism, "parallelism", DefaultParallelism, "Number of parallel workers for resource processing (0 = use number of CPUs)")
+}
 
-	// We'll parse the flags in main.go, not here
-	
-	c.IncludeResources = strings.Split(includeResources, ",")
-	c.ExcludeResources = strings.Split(excludeResources, ",")
-	c.IncludeNamespaces = strings.Split(includeNamespaces, ",")
-	c.ExcludeNamespaces = strings.Split(excludeNamespaces, ",")
+// ParseStringFlags parses the comma-separated string flags into string slices
+// This must be called after flag.Parse()
+func (c *Config) ParseStringFlags() {
+	c.IncludeResources = strings.Split(c.includeResourcesStr, ",")
+	c.ExcludeResources = strings.Split(c.excludeResourcesStr, ",")
+	c.IncludeNamespaces = strings.Split(c.includeNamespacesStr, ",")
+	c.ExcludeNamespaces = strings.Split(c.excludeNamespacesStr, ",")
 }
 
 // Validate checks if the configuration is valid
