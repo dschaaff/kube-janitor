@@ -3,6 +3,7 @@ package janitor
 import (
 	"context"
 	"flag"
+	"sync"
 	"testing"
 	"time"
 
@@ -306,5 +307,58 @@ func TestNamespaceCleanupWithTTL(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+func TestNamespaceClusterResourcesBug(t *testing.T) {
+	// This test demonstrates the bug where namespaces require --include-cluster-resources
+	// to be processed, even though the documentation states they should be handled by default
+	
+	// Create janitor with IncludeClusterResources = false (default)
+	config := &Config{
+		IncludeNamespaces:       []string{"all"},
+		ExcludeNamespaces:       []string{"kube-system"},
+		IncludeResources:        []string{"all"},
+		IncludeClusterResources: false, // This is the default
+		DryRun:                  true,
+		Parallelism:             1,
+	}
+
+	// Create a test namespace using the k8s API types (like cleanupNamespaces does)
+	testNamespace := &corev1.Namespace{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-namespace",
+			CreationTimestamp: metav1.Time{
+				Time: time.Now().Add(-3 * time.Hour),
+			},
+			Annotations: map[string]string{
+				TTLAnnotation: "2h",
+			},
+		},
+	}
+
+	// Create fake client and add the namespace
+	clientset := fake.NewSimpleClientset(testNamespace)
+	
+	j := &Janitor{
+		client: clientset,
+		config: config,
+		cache:  make(map[string]interface{}),
+		counterMutex: sync.Mutex{},
+	}
+
+	// Test using the real namespace object (as cleanupNamespaces does)
+	matches := j.matchesResourceFilter(testNamespace)
+
+	// According to the documentation, namespaces should be processed by default
+	// without needing --include-cluster-resources flag
+	if !matches {
+		t.Errorf("BUG: Namespace should be processed by default without --include-cluster-resources flag, but matchesResourceFilter returned false. This contradicts the documentation.")
+	}
+
+	// Now test with include-cluster-resources = true (should definitely work)
+	config.IncludeClusterResources = true
+	matches = j.matchesResourceFilter(testNamespace)
+	if !matches {
+		t.Errorf("Namespace should definitely be processed with --include-cluster-resources flag, but matchesResourceFilter returned false")
 	}
 }
