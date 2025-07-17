@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	defaultExcludeResources  = "events,controllerrevisions"
+	defaultExcludeResources  = "events,controllerrevisions,endpoints"
 	defaultExcludeNamespaces = "kube-system"
 	defaultInterval         = 30
 	defaultLogFormat       = "%(asctime)s %(levelname)s: %(message)s"

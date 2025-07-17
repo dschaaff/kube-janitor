@@ -69,6 +69,9 @@ func GetResourceTypes(client kubernetes.Interface) ([]ResourceType, error) {
         }
     }
 
+    // Remove deprecated APIs when newer alternatives exist
+    filterDeprecatedAPIs(resourceTypesMap)
+
     // Convert map to slice
     resourceTypes := make([]ResourceType, 0, len(resourceTypesMap))
     for _, rt := range resourceTypesMap {
@@ -76,6 +79,14 @@ func GetResourceTypes(client kubernetes.Interface) ([]ResourceType, error) {
     }
 
     return resourceTypes, nil
+}
+
+// filterDeprecatedAPIs removes deprecated API resources when newer alternatives exist
+func filterDeprecatedAPIs(resourceTypesMap map[string]ResourceType) {
+    // Remove v1/endpoints if discovery.k8s.io/v1/endpointslices exists
+    if _, hasEndpointSlices := resourceTypesMap["discovery.k8s.io/v1/endpointslices"]; hasEndpointSlices {
+        delete(resourceTypesMap, "v1/endpoints")
+    }
 }
 
 func stringInSlice(str string, slice []string) bool {
