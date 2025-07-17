@@ -456,7 +456,7 @@ func (j *Janitor) handleExpiry(ctx context.Context, obj metav1.Object, counter m
         return nil
     }
 
-    expiryTime, err := time.Parse(time.RFC3339, expiry)
+    expiryTime, err := ParseExpiry(expiry)
     if err != nil {
         return fmt.Errorf("invalid expiry value: %v", err)
     }

@@ -74,6 +74,58 @@ func TestParseTTL(t *testing.T) {
     }
 }
 
+func TestParseExpiry(t *testing.T) {
+    tests := []struct {
+        name    string
+        expiry  string
+        wantErr bool
+    }{
+        {
+            name:    "RFC3339 format",
+            expiry:  "2025-07-21T10:30:00Z",
+            wantErr: false,
+        },
+        {
+            name:    "RFC3339 format with timezone",
+            expiry:  "2025-07-21T10:30:00-07:00",
+            wantErr: false,
+        },
+        {
+            name:    "datetime without timezone",
+            expiry:  "2025-07-21T10:30",
+            wantErr: false,
+        },
+        {
+            name:    "date only format",
+            expiry:  "2025-07-21",
+            wantErr: false,
+        },
+        {
+            name:    "invalid format",
+            expiry:  "invalid-date",
+            wantErr: true,
+        },
+        {
+            name:    "empty string",
+            expiry:  "",
+            wantErr: true,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got, err := ParseExpiry(tt.expiry)
+            if (err != nil) != tt.wantErr {
+                t.Errorf("ParseExpiry() error = %v, wantErr %v", err, tt.wantErr)
+                return
+            }
+            if err == nil && got.IsZero() {
+                t.Errorf("ParseExpiry() returned zero time for valid input %q", tt.expiry)
+            }
+        })
+    }
+}
+
 func TestFormatDuration(t *testing.T) {
     tests := []struct {
         name     string
