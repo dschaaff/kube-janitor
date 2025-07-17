@@ -27,7 +27,6 @@ type RulesFile struct {
 	Rules []Rule `yaml:"rules"`
 }
 
-
 // ValidateAndCompile validates the rule and compiles its JMESPath expression
 func (r *Rule) ValidateAndCompile() error {
 	// Validate rule ID

@@ -10,52 +10,52 @@ import (
 const (
 	defaultExcludeResources  = "events,controllerrevisions,endpoints"
 	defaultExcludeNamespaces = "kube-system"
-	defaultInterval         = 30
-	defaultLogFormat       = "%(asctime)s %(levelname)s: %(message)s"
+	defaultInterval          = 30
+	defaultLogFormat         = "%(asctime)s %(levelname)s: %(message)s"
 )
 
 // Config holds all configuration options for the janitor
 type Config struct {
 	// Command line flags
-	DryRun                  bool
-	Debug                   bool
-	Quiet                   bool
-	Once                    bool
-	Interval               int
-	WaitAfterDelete        int
-	DeleteNotification     int
-	IncludeResources      []string
-	ExcludeResources      []string
-	IncludeNamespaces     []string
-	ExcludeNamespaces     []string
-	RulesFile             string
+	DryRun                   bool
+	Debug                    bool
+	Quiet                    bool
+	Once                     bool
+	Interval                 int
+	WaitAfterDelete          int
+	DeleteNotification       int
+	IncludeResources         []string
+	ExcludeResources         []string
+	IncludeNamespaces        []string
+	ExcludeNamespaces        []string
+	RulesFile                string
 	DeploymentTimeAnnotation string
-	IncludeClusterResources bool
-	LogFormat             string
-	Parallelism           int
+	IncludeClusterResources  bool
+	LogFormat                string
+	Parallelism              int
 
 	// Internal string fields for flag parsing
-	includeResourcesStr   string
-	excludeResourcesStr   string
-	includeNamespacesStr  string
-	excludeNamespacesStr  string
+	includeResourcesStr  string
+	excludeResourcesStr  string
+	includeNamespacesStr string
+	excludeNamespacesStr string
 
 	// Additional configuration
 	Rules               []Rule
 	ResourceContextHook ResourceContextHook
-	WebhookURL         string
+	WebhookURL          string
 }
 
 // NewConfig creates a new Config with default values
 func NewConfig() *Config {
 	return &Config{
 		Interval:          defaultInterval,
-		LogFormat:        defaultLogFormat,
-		ExcludeResources: strings.Split(defaultExcludeResources, ","),
+		LogFormat:         defaultLogFormat,
+		ExcludeResources:  strings.Split(defaultExcludeResources, ","),
 		ExcludeNamespaces: strings.Split(defaultExcludeNamespaces, ","),
-		IncludeResources: []string{"all"},
+		IncludeResources:  []string{"all"},
 		IncludeNamespaces: []string{"all"},
-		Parallelism:      DefaultParallelism,
+		Parallelism:       DefaultParallelism,
 	}
 }
 
@@ -68,13 +68,13 @@ func (c *Config) AddFlags(fs *flag.FlagSet) {
 	fs.IntVar(&c.Interval, "interval", defaultInterval, "Loop interval in seconds")
 	fs.IntVar(&c.WaitAfterDelete, "wait-after-delete", 0, "Wait time after issuing a delete (in seconds)")
 	fs.IntVar(&c.DeleteNotification, "delete-notification", 0, "Send an event seconds before to warn of the deletion")
-	
+
 	// Use custom variables to handle comma-separated lists
 	fs.StringVar(&c.includeResourcesStr, "include-resources", getEnvOrDefault("INCLUDE_RESOURCES", "all"), "Resources to consider for clean up (comma-separated)")
 	fs.StringVar(&c.excludeResourcesStr, "exclude-resources", getEnvOrDefault("EXCLUDE_RESOURCES", defaultExcludeResources), "Resources to exclude from clean up (comma-separated)")
 	fs.StringVar(&c.includeNamespacesStr, "include-namespaces", getEnvOrDefault("INCLUDE_NAMESPACES", "all"), "Include namespaces for clean up (comma-separated)")
 	fs.StringVar(&c.excludeNamespacesStr, "exclude-namespaces", getEnvOrDefault("EXCLUDE_NAMESPACES", defaultExcludeNamespaces), "Exclude namespaces from clean up (comma-separated)")
-	
+
 	fs.StringVar(&c.RulesFile, "rules-file", os.Getenv("RULES_FILE"), "Load TTL rules from given file path")
 	fs.StringVar(&c.DeploymentTimeAnnotation, "deployment-time-annotation", "", "Annotation that contains a resource's last deployment time")
 	fs.BoolVar(&c.IncludeClusterResources, "include-cluster-resources", false, "Include cluster scoped resources")
