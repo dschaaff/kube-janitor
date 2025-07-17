@@ -775,6 +775,8 @@ func (j *Janitor) deleteResource(ctx context.Context, obj metav1.Object) error {
 		kind := "Unknown"
 		if u, ok := obj.(*unstructured.Unstructured); ok {
 			kind = u.GetKind()
+		} else if _, ok := obj.(*corev1.Namespace); ok {
+			kind = "Namespace"
 		}
 
 		log.Printf("**DRY-RUN**: Would delete %s %s/%s",
@@ -794,6 +796,13 @@ func (j *Janitor) deleteResource(ctx context.Context, obj metav1.Object) error {
 			Group:    gvk.Group,
 			Version:  gvk.Version,
 			Resource: strings.ToLower(gvk.Kind) + "s",
+		}
+	} else if _, ok := obj.(*corev1.Namespace); ok {
+		// Handle namespace objects specifically
+		gvr = schema.GroupVersionResource{
+			Group:    "",
+			Version:  "v1",
+			Resource: "namespaces",
 		}
 	} else {
 		// Default to core/v1 if we can't determine the GVR
@@ -846,6 +855,8 @@ func (j *Janitor) handleResource(ctx context.Context, resource metav1.Object, co
 	kind := "Unknown"
 	if u, ok := resource.(*unstructured.Unstructured); ok {
 		kind = u.GetKind()
+	} else if _, ok := resource.(*corev1.Namespace); ok {
+		kind = "Namespace"
 	}
 
 	j.debugLog("Processing resource: %s/%s/%s", kind, resource.GetNamespace(), resource.GetName())
@@ -944,6 +955,8 @@ func (j *Janitor) processResourcesInParallel(ctx context.Context, resources []me
 				kind := "Unknown"
 				if u, ok := resource.(*unstructured.Unstructured); ok {
 					kind = u.GetKind()
+				} else if _, ok := resource.(*corev1.Namespace); ok {
+					kind = "Namespace"
 				}
 				key := fmt.Sprintf("%s/%s/%s", kind, resource.GetNamespace(), resource.GetName())
 				seen := alreadySeen[key]
