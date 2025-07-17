@@ -346,6 +346,23 @@ func TestHandleExpiry(t *testing.T) {
             },
             wantErr: true,
         },
+        {
+            name: "date-only expiry format should be supported",
+            resource: &corev1.Pod{
+                TypeMeta: metav1.TypeMeta{
+                    Kind:       "Pod",
+                    APIVersion: "v1",
+                },
+                ObjectMeta: metav1.ObjectMeta{
+                    Name:      "test-pod",
+                    Namespace: "default",
+                    Annotations: map[string]string{
+                        ExpiryAnnotation: "2025-07-21",
+                    },
+                },
+            },
+            wantErr: false,
+        },
     }
 
     for _, tt := range tests {
