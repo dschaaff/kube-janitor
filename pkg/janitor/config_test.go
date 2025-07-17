@@ -15,50 +15,50 @@ import (
 
 func TestConfigFlagParsing(t *testing.T) {
 	tests := []struct {
-		name                  string
-		args                  []string
-		expectedIncludeResources []string
-		expectedExcludeResources []string
+		name                      string
+		args                      []string
+		expectedIncludeResources  []string
+		expectedExcludeResources  []string
 		expectedIncludeNamespaces []string
 		expectedExcludeNamespaces []string
 	}{
 		{
-			name: "default flags",
-			args: []string{},
-			expectedIncludeResources: []string{"all"},
-			expectedExcludeResources: []string{"events", "controllerrevisions", "endpoints"},
+			name:                      "default flags",
+			args:                      []string{},
+			expectedIncludeResources:  []string{"all"},
+			expectedExcludeResources:  []string{"events", "controllerrevisions", "endpoints"},
 			expectedIncludeNamespaces: []string{"all"},
 			expectedExcludeNamespaces: []string{"kube-system"},
 		},
 		{
-			name: "custom include resources",
-			args: []string{"-include-resources", "pods,services"},
-			expectedIncludeResources: []string{"pods", "services"},
-			expectedExcludeResources: []string{"events", "controllerrevisions", "endpoints"},
+			name:                      "custom include resources",
+			args:                      []string{"-include-resources", "pods,services"},
+			expectedIncludeResources:  []string{"pods", "services"},
+			expectedExcludeResources:  []string{"events", "controllerrevisions", "endpoints"},
 			expectedIncludeNamespaces: []string{"all"},
 			expectedExcludeNamespaces: []string{"kube-system"},
 		},
 		{
-			name: "custom include namespaces",
-			args: []string{"-include-namespaces", "default,test"},
-			expectedIncludeResources: []string{"all"},
-			expectedExcludeResources: []string{"events", "controllerrevisions", "endpoints"},
+			name:                      "custom include namespaces",
+			args:                      []string{"-include-namespaces", "default,test"},
+			expectedIncludeResources:  []string{"all"},
+			expectedExcludeResources:  []string{"events", "controllerrevisions", "endpoints"},
 			expectedIncludeNamespaces: []string{"default", "test"},
 			expectedExcludeNamespaces: []string{"kube-system"},
 		},
 		{
-			name: "custom exclude namespaces",
-			args: []string{"-exclude-namespaces", "kube-system,kube-public"},
-			expectedIncludeResources: []string{"all"},
-			expectedExcludeResources: []string{"events", "controllerrevisions", "endpoints"},
+			name:                      "custom exclude namespaces",
+			args:                      []string{"-exclude-namespaces", "kube-system,kube-public"},
+			expectedIncludeResources:  []string{"all"},
+			expectedExcludeResources:  []string{"events", "controllerrevisions", "endpoints"},
 			expectedIncludeNamespaces: []string{"all"},
 			expectedExcludeNamespaces: []string{"kube-system", "kube-public"},
 		},
 		{
-			name: "single namespace include",
-			args: []string{"-include-namespaces", "test-namespace"},
-			expectedIncludeResources: []string{"all"},
-			expectedExcludeResources: []string{"events", "controllerrevisions", "endpoints"},
+			name:                      "single namespace include",
+			args:                      []string{"-include-namespaces", "test-namespace"},
+			expectedIncludeResources:  []string{"all"},
+			expectedExcludeResources:  []string{"events", "controllerrevisions", "endpoints"},
 			expectedIncludeNamespaces: []string{"test-namespace"},
 			expectedExcludeNamespaces: []string{"kube-system"},
 		},
@@ -68,7 +68,7 @@ func TestConfigFlagParsing(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a new FlagSet for this test
 			fs := flag.NewFlagSet("test", flag.ContinueOnError)
-			
+
 			// Create config and add flags
 			config := NewConfig()
 			config.AddFlags(fs)
@@ -129,13 +129,13 @@ func TestConfigFlagParsing(t *testing.T) {
 
 func TestNamespaceCleanupWithTTL(t *testing.T) {
 	tests := []struct {
-		name                  string
-		includeNamespaces     []string
-		excludeNamespaces     []string
-		includeResources      []string
-		namespaces            []corev1.Namespace
-		expectProcessed       []string
-		expectSkipped         []string
+		name              string
+		includeNamespaces []string
+		excludeNamespaces []string
+		includeResources  []string
+		namespaces        []corev1.Namespace
+		expectProcessed   []string
+		expectSkipped     []string
 	}{
 		{
 			name:              "specific namespace with TTL",
@@ -250,7 +250,7 @@ func TestNamespaceCleanupWithTTL(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create fake clientset
 			clientset := fake.NewSimpleClientset()
-			
+
 			// Create test namespaces
 			for _, ns := range tt.namespaces {
 				_, err := clientset.CoreV1().Namespaces().Create(context.Background(), &ns, metav1.CreateOptions{})
@@ -289,7 +289,7 @@ func TestNamespaceCleanupWithTTL(t *testing.T) {
 					},
 				}
 				matches := j.matchesResourceFilter(nsUnstructured)
-				
+
 				expectedProcessed := false
 				for _, expected := range tt.expectProcessed {
 					if ns.Name == expected {
@@ -297,7 +297,7 @@ func TestNamespaceCleanupWithTTL(t *testing.T) {
 						break
 					}
 				}
-				
+
 				if matches != expectedProcessed {
 					if expectedProcessed {
 						t.Errorf("Expected namespace %s to be processed, but it was not", ns.Name)
@@ -312,7 +312,7 @@ func TestNamespaceCleanupWithTTL(t *testing.T) {
 func TestNamespaceClusterResourcesBug(t *testing.T) {
 	// This test demonstrates the bug where namespaces require --include-cluster-resources
 	// to be processed, even though the documentation states they should be handled by default
-	
+
 	// Create janitor with IncludeClusterResources = false (default)
 	config := &Config{
 		IncludeNamespaces:       []string{"all"},
@@ -338,11 +338,11 @@ func TestNamespaceClusterResourcesBug(t *testing.T) {
 
 	// Create fake client and add the namespace
 	clientset := fake.NewSimpleClientset(testNamespace)
-	
+
 	j := &Janitor{
-		client: clientset,
-		config: config,
-		cache:  make(map[string]interface{}),
+		client:       clientset,
+		config:       config,
+		cache:        make(map[string]interface{}),
 		counterMutex: sync.Mutex{},
 	}
 
