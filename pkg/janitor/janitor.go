@@ -1015,6 +1015,9 @@ func (j *Janitor) matchesResourceFilter(obj metav1.Object) bool {
     kind := "Unknown"
     if u, ok := obj.(*unstructured.Unstructured); ok {
         kind = u.GetKind()
+    } else if ns, ok := obj.(*corev1.Namespace); ok {
+        kind = "Namespace"
+        _ = ns // avoid unused variable warning
     }
 
     namespace := obj.GetNamespace()
