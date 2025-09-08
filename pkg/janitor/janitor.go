@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -30,7 +29,6 @@ type Janitor struct {
 	config        *Config
 	cache         map[string]interface{}
 	debug         bool
-	counterMutex  sync.Mutex
 }
 
 // New creates a new Janitor instance
@@ -225,7 +223,6 @@ func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType Resource
 
 		// Collect all resources from all namespaces first
 		var allResources []metav1.Object
-		var resourcesMutex sync.Mutex
 
 		for _, ns := range namespaces.Items {
 			// Skip excluded namespaces
@@ -242,13 +239,11 @@ func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType Resource
 			}
 			j.debugLog("Found %d resources of type %s in namespace %s", len(resources), resourceType.Kind, ns.Name)
 
-			resourcesMutex.Lock()
 			allResources = append(allResources, resources...)
-			resourcesMutex.Unlock()
 		}
 
-		// Process resources in parallel
-		j.processResourcesInParallel(ctx, allResources, counter, alreadySeen)
+		// Process resources serially
+		j.processResourcesSerially(ctx, allResources, counter)
 
 	} else if j.config.IncludeClusterResources {
 		// Process cluster-scoped resources if enabled
@@ -259,8 +254,8 @@ func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType Resource
 		}
 		j.debugLog("Found %d cluster-scoped resources of type %s", len(resources), resourceType.Kind)
 
-		// Process resources in parallel
-		j.processResourcesInParallel(ctx, resources, counter, alreadySeen)
+		// Process resources serially
+		j.processResourcesSerially(ctx, resources, counter)
 	}
 
 	return nil
@@ -483,8 +478,6 @@ func (j *Janitor) handleExpiry(ctx context.Context, obj metav1.Object, counter m
 			return fmt.Errorf("failed to delete resource: %v", err)
 		}
 
-		j.counterMutex.Lock()
-		defer j.counterMutex.Unlock()
 		resourceType := fmt.Sprintf("%ss", strings.ToLower(kind))
 		counter[resourceType+"-deleted"]++
 	} else if j.config.DeleteNotification > 0 {
@@ -721,8 +714,6 @@ func (j *Janitor) handleRules(ctx context.Context, obj metav1.Object, counter ma
 					return fmt.Errorf("failed to delete resource: %v", err)
 				}
 
-				j.counterMutex.Lock()
-				defer j.counterMutex.Unlock()
 				resourceType := fmt.Sprintf("%ss", strings.ToLower(kind))
 				counter[resourceType+"-deleted"]++
 				return nil
@@ -867,9 +858,7 @@ func (j *Janitor) handleResource(ctx context.Context, resource metav1.Object, co
 		return nil
 	}
 
-	// Increment counter with mutex protection
-	j.counterMutex.Lock()
-	defer j.counterMutex.Unlock()
+	// Increment counter
 	counter["resources-processed"]++
 
 	j.debugLog("Checking TTL for resource: %s/%s/%s",
@@ -913,92 +902,61 @@ func (j *Janitor) cleanupNamespaces(ctx context.Context, counter map[string]int)
 		}
 	}
 
-	// Process namespaces in parallel
-	j.processResourcesInParallel(ctx, filteredNamespaces, counter, make(map[string]bool))
+	// Process namespaces serially
+	j.processResourcesSerially(ctx, filteredNamespaces, counter)
 
 	return nil
 }
 
-// processResourcesInParallel processes resources in parallel using worker pool
-func (j *Janitor) processResourcesInParallel(ctx context.Context, resources []metav1.Object, counter map[string]int, alreadySeen map[string]bool) {
+// processResourcesSerially processes resources one by one in serial order
+func (j *Janitor) processResourcesSerially(ctx context.Context, resources []metav1.Object, counter map[string]int) {
 	if len(resources) == 0 {
 		return
 	}
 
-	// Use a mutex to protect alreadySeen map
-	var alreadySeenMutex sync.Mutex
+	j.debugLog("Processing %d resources serially", len(resources))
 
-	// Create a wait group to wait for all workers to finish
-	var wg sync.WaitGroup
-
-	// Create a channel for resources
-	resourceCh := make(chan metav1.Object, len(resources))
-
-	// Determine number of workers
-	numWorkers := j.config.Parallelism
-	if numWorkers <= 0 {
-		numWorkers = 1
-	}
-
-	j.debugLog("Processing %d resources with %d workers", len(resources), numWorkers)
-
-	// Start workers
-	for i := 0; i < numWorkers; i++ {
-		wg.Add(1)
-		go func(workerID int) {
-			defer wg.Done()
-			j.debugLog("Worker %d started", workerID)
-
-			for resource := range resourceCh {
-				// Check if already processed
-				alreadySeenMutex.Lock()
-				kind := "Unknown"
-				if u, ok := resource.(*unstructured.Unstructured); ok {
-					kind = u.GetKind()
-				} else if _, ok := resource.(*corev1.Namespace); ok {
-					kind = "Namespace"
-				}
-				key := fmt.Sprintf("%s/%s/%s", kind, resource.GetNamespace(), resource.GetName())
-				seen := alreadySeen[key]
-				if !seen {
-					alreadySeen[key] = true
-				}
-				alreadySeenMutex.Unlock()
-
-				if seen {
-					j.debugLog("Worker %d: Skipping already processed resource: %s", workerID, key)
-					continue
-				}
-
-				j.debugLog("Worker %d: Processing resource: %s", workerID, key)
-
-				if err := j.handleResource(ctx, resource, counter, alreadySeen); err != nil {
-					log.Printf("Worker %d: Error handling %s %s/%s: %v",
-						workerID, kind, resource.GetNamespace(), resource.GetName(), err)
-				}
-			}
-
-			j.debugLog("Worker %d finished", workerID)
-		}(i)
-	}
-
-	// Send resources to channel
+	alreadySeen := make(map[string]bool)
+	
 	for _, resource := range resources {
-		resourceCh <- resource
+		// Check for context cancellation before processing each resource
+		select {
+		case <-ctx.Done():
+			j.debugLog("Context cancelled, stopping resource processing")
+			return
+		default:
+		}
+
+		// Check if already processed
+		kind := "Unknown"
+		if u, ok := resource.(*unstructured.Unstructured); ok {
+			kind = u.GetKind()
+		} else if _, ok := resource.(*corev1.Namespace); ok {
+			kind = "Namespace"
+		}
+		key := fmt.Sprintf("%s/%s/%s", kind, resource.GetNamespace(), resource.GetName())
+		
+		if alreadySeen[key] {
+			j.debugLog("Skipping already processed resource: %s", key)
+			continue
+		}
+		alreadySeen[key] = true
+
+		j.debugLog("Processing resource: %s", key)
+
+		if err := j.handleResource(ctx, resource, counter, alreadySeen); err != nil {
+			log.Printf("Error handling %s %s/%s: %v",
+				kind, resource.GetNamespace(), resource.GetName(), err)
+		}
 	}
 
-	// Close channel and wait for workers to finish
-	close(resourceCh)
-	wg.Wait()
+	j.debugLog("Finished processing resources")
 }
 
 func (j *Janitor) logCleanupSummary(counter map[string]int) {
 	if j.config.Quiet {
 		return
 	}
-
-	j.counterMutex.Lock()
-	defer j.counterMutex.Unlock()
 
 	var stats []string
 	for k, v := range counter {

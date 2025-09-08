@@ -3,7 +3,6 @@ package janitor
 import (
 	"context"
 	"flag"
-	"sync"
 	"testing"
 	"time"
 
@@ -265,7 +264,6 @@ func TestNamespaceCleanupWithTTL(t *testing.T) {
 				ExcludeNamespaces: tt.excludeNamespaces,
 				IncludeResources:  tt.includeResources,
 				DryRun:            true,
-				Parallelism:       1,
 			}
 
 			j := &Janitor{
@@ -320,7 +318,6 @@ func TestNamespaceClusterResourcesBug(t *testing.T) {
 		IncludeResources:        []string{"all"},
 		IncludeClusterResources: false, // This is the default
 		DryRun:                  true,
-		Parallelism:             1,
 	}
 
 	// Create a test namespace using the k8s API types (like cleanupNamespaces does)
@@ -343,7 +340,6 @@ func TestNamespaceClusterResourcesBug(t *testing.T) {
 		client:       clientset,
 		config:       config,
 		cache:        make(map[string]interface{}),
-		counterMutex: sync.Mutex{},
 	}
 
 	// Test using the real namespace object (as cleanupNamespaces does)

@@ -32,7 +32,6 @@ type Config struct {
 	DeploymentTimeAnnotation string
 	IncludeClusterResources  bool
 	LogFormat                string
-	Parallelism              int
 
 	// Internal string fields for flag parsing
 	includeResourcesStr  string
@@ -55,7 +54,6 @@ func NewConfig() *Config {
 		ExcludeNamespaces: strings.Split(defaultExcludeNamespaces, ","),
 		IncludeResources:  []string{"all"},
 		IncludeNamespaces: []string{"all"},
-		Parallelism:       DefaultParallelism,
 	}
 }
 
@@ -79,7 +77,6 @@ func (c *Config) AddFlags(fs *flag.FlagSet) {
 	fs.StringVar(&c.DeploymentTimeAnnotation, "deployment-time-annotation", "", "Annotation that contains a resource's last deployment time")
 	fs.BoolVar(&c.IncludeClusterResources, "include-cluster-resources", false, "Include cluster scoped resources")
 	fs.StringVar(&c.LogFormat, "log-format", defaultLogFormat, "Set custom log format")
-	fs.IntVar(&c.Parallelism, "parallelism", DefaultParallelism, "Number of parallel workers for resource processing (0 = use number of CPUs)")
 }
 
 // ParseStringFlags parses the comma-separated string flags into string slices
@@ -105,9 +102,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("wait-after-delete must be greater than or equal to 0")
 	}
 
-	if c.Parallelism < 0 {
-		return fmt.Errorf("parallelism must be greater than or equal to 0")
-	}
 
 	return nil
 }

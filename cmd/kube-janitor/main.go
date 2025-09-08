@@ -5,7 +5,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/dschaaff/kube-janitor/pkg/janitor"
@@ -31,10 +30,6 @@ func main() {
 	// Parse the comma-separated string flags after flag.Parse()
 	config.ParseStringFlags()
 
-	// Set default parallelism if not specified
-	if config.Parallelism == 0 {
-		config.Parallelism = runtime.NumCPU()
-	}
 
 	if config.Debug {
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -44,7 +39,6 @@ func main() {
 		log.Println("Running in dry-run mode")
 	}
 
-	log.Printf("Performance settings: parallelism=%d", config.Parallelism)
 
 	// Check for KUBECONFIG environment variable
 	if os.Getenv("KUBECONFIG") == "" {
