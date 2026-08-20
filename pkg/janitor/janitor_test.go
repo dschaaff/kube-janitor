@@ -376,7 +376,7 @@ func TestHandleExpiry(t *testing.T) {
 			}
 
 			counter := make(map[string]int)
-			err := j.handleExpiry(context.Background(), tt.resource, counter)
+			err := j.handleExpiry(context.Background(), mustTarget(t, tt.resource), counter)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("handleExpiry() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -458,7 +458,7 @@ func TestHandleResourceTTL(t *testing.T) {
 			}
 
 			counter := make(map[string]int)
-			err := j.handleTTL(context.Background(), tt.resource, counter)
+			err := j.handleTTL(context.Background(), mustTarget(t, tt.resource), counter)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("handleResourceTTL() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -570,7 +570,7 @@ func TestCleanupWithWebhookNotification(t *testing.T) {
 
 	// Instead of running full cleanup, just handle this resource directly
 	counter := make(map[string]int)
-	err = j.handleTTL(context.Background(), pod, counter)
+	err = j.handleTTL(context.Background(), mustTarget(t, pod), counter)
 	if err != nil {
 		t.Errorf("handleTTL() error = %v", err)
 	}

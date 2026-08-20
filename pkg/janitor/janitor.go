@@ -86,69 +86,44 @@ func getDynamicClient() (dynamic.Interface, error) {
 }
 
 // sendDeleteNotification sends a notification about upcoming resource deletion
-func (j *Janitor) sendDeleteNotification(ctx context.Context, resource metav1.Object, reason string, expiryTime time.Time) error {
+func (j *Janitor) sendDeleteNotification(ctx context.Context, t Target, reason string, expiryTime time.Time) error {
 	if j.config.DryRun {
-		// Use type assertion to get the kind
-		kind := "Unknown"
-		if u, ok := resource.(*unstructured.Unstructured); ok {
-			kind = u.GetKind()
-		}
-
-		log.Printf("**DRY-RUN**: Would send delete notification for %s %s/%s",
-			kind,
-			resource.GetNamespace(),
-			resource.GetName())
+		log.Printf("**DRY-RUN**: Would send delete notification for %s", t.describe())
 		j.debugLog("Notification reason: %s, expiry time: %s", reason, expiryTime)
 		return nil
 	}
 
-	// Check if already notified
-	annotations := resource.GetAnnotations()
-	if annotations != nil {
-		if _, notified := annotations[NotifiedAnnotation]; notified {
-			return nil
-		}
+	if t.wasNotified() {
+		return nil
 	}
 
-	// Create notification message
 	contextName := os.Getenv("CONTEXT_NAME")
-	formattedTime := expiryTime.Format(time.RFC3339)
-
-	// Get kind using type assertion
-	kind := "Unknown"
-	if u, ok := resource.(*unstructured.Unstructured); ok {
-		kind = u.GetKind()
+	prefix := ""
+	if contextName != "" {
+		prefix = "[" + contextName + "] "
 	}
 
-	message := fmt.Sprintf("%s%s %s/%s will be deleted at %s (%s)",
-		func() string {
-			if contextName != "" {
-				return "[" + contextName + "] "
-			}
-			return ""
-		}(),
-		kind,
-		resource.GetNamespace(),
-		resource.GetName(),
-		formattedTime,
+	message := fmt.Sprintf("%s%s will be deleted at %s (%s)",
+		prefix,
+		t.describe(),
+		expiryTime.Format(time.RFC3339),
 		reason)
 
-	// Create event
-	if err := j.createEvent(ctx, resource, message, "DeleteNotification"); err != nil {
+	if err := j.createEvent(ctx, t, message, "DeleteNotification"); err != nil {
 		return err
 	}
 
-	// Send webhook notification
 	if err := SendWebhookNotification(message); err != nil {
 		log.Printf("Failed to send webhook notification: %v", err)
 	}
 
-	// Add notification flag
-	if annotations == nil {
-		annotations = make(map[string]string)
+	// Flags the target as notified for the rest of this run only. Nothing writes
+	// the annotation back to the cluster, so notifications re-fire on the next
+	// run. Fixing that needs the "patch" verb, which deploy/rbac.yaml does not
+	// grant.
+	if t.Annotations != nil {
+		t.Annotations[NotifiedAnnotation] = "yes"
 	}
-	annotations[NotifiedAnnotation] = "yes"
-	resource.SetAnnotations(annotations)
 
 	return nil
 }
@@ -386,23 +361,14 @@ func getKubeClient() (kubernetes.Interface, error) {
 }
 
 // createEvent creates a Kubernetes event for the given resource
-func (j *Janitor) createEvent(ctx context.Context, resource metav1.Object, message string, reason string) error {
+func (j *Janitor) createEvent(ctx context.Context, t Target, message string, reason string) error {
 	if j.config.DryRun {
 		log.Printf("**DRY-RUN**: Would create event: %s", message)
 		return nil
 	}
 
-	// Get kind and API version using type assertion
-	kind := "Unknown"
-	apiVersion := "v1"
-
-	if u, ok := resource.(*unstructured.Unstructured); ok {
-		kind = u.GetKind()
-		apiVersion = u.GetAPIVersion()
-	}
-
 	// Determine event namespace - use fallback for cluster-scoped resources
-	eventNamespace := resource.GetNamespace()
+	eventNamespace := t.Namespace
 	if eventNamespace == "" {
 		eventNamespace = "default"
 	}
@@ -414,11 +380,11 @@ func (j *Janitor) createEvent(ctx context.Context, resource metav1.Object, messa
 			Namespace:    eventNamespace,
 		},
 		InvolvedObject: corev1.ObjectReference{
-			APIVersion: apiVersion,
-			Kind:       kind,
-			Name:       resource.GetName(),
-			Namespace:  resource.GetNamespace(),
-			UID:        resource.GetUID(),
+			APIVersion: t.APIVersion,
+			Kind:       t.Kind,
+			Name:       t.Name,
+			Namespace:  t.Namespace,
+			UID:        t.UID,
 		},
 		Reason:         reason,
 		Message:        message,
@@ -440,13 +406,8 @@ func (j *Janitor) createEvent(ctx context.Context, resource metav1.Object, messa
 }
 
 // handleExpiry processes a resource's expiry annotation
-func (j *Janitor) handleExpiry(ctx context.Context, obj metav1.Object, counter map[string]int) error {
-	annotations := obj.GetAnnotations()
-	if annotations == nil {
-		return nil
-	}
-
-	expiry, ok := annotations[ExpiryAnnotation]
+func (j *Janitor) handleExpiry(ctx context.Context, t Target, counter map[string]int) error {
+	expiry, ok := t.Annotations[ExpiryAnnotation]
 	if !ok {
 		return nil
 	}
@@ -456,34 +417,25 @@ func (j *Janitor) handleExpiry(ctx context.Context, obj metav1.Object, counter m
 		return fmt.Errorf("invalid expiry value: %v", err)
 	}
 
-	// Get kind using type assertion
-	kind := "Unknown"
-	if u, ok := obj.(*unstructured.Unstructured); ok {
-		kind = u.GetKind()
-	}
-
 	if time.Now().After(expiryTime) {
-		message := fmt.Sprintf("%s %s/%s expired on %s and will be deleted (annotation %s is set)",
-			kind,
-			obj.GetNamespace(),
-			obj.GetName(),
+		message := fmt.Sprintf("%s expired on %s and will be deleted (annotation %s is set)",
+			t.describe(),
 			expiry,
 			ExpiryAnnotation)
 
-		if err := j.createEvent(ctx, obj, message, "ExpiryTimeReached"); err != nil {
+		if err := j.createEvent(ctx, t, message, "ExpiryTimeReached"); err != nil {
 			return fmt.Errorf("failed to create event: %v", err)
 		}
 
-		if err := j.deleteResource(ctx, obj); err != nil {
+		if err := j.deleteResource(ctx, t); err != nil {
 			return fmt.Errorf("failed to delete resource: %v", err)
 		}
 
-		resourceType := fmt.Sprintf("%ss", strings.ToLower(kind))
-		counter[resourceType+"-deleted"]++
+		counter[t.GVR.Resource+"-deleted"]++
 	} else if j.config.DeleteNotification > 0 {
 		notificationTime := expiryTime.Add(-time.Duration(j.config.DeleteNotification) * time.Second)
-		if time.Now().After(notificationTime) && !j.wasNotified(obj) {
-			if err := j.sendDeleteNotification(ctx, obj, fmt.Sprintf("annotation %s is set", ExpiryAnnotation), expiryTime); err != nil {
+		if time.Now().After(notificationTime) && !t.wasNotified() {
+			if err := j.sendDeleteNotification(ctx, t, fmt.Sprintf("annotation %s is set", ExpiryAnnotation), expiryTime); err != nil {
 				return fmt.Errorf("failed to send delete notification: %v", err)
 			}
 		}
@@ -491,8 +443,6 @@ func (j *Janitor) handleExpiry(ctx context.Context, obj metav1.Object, counter m
 
 	return nil
 }
-
-// wasNotified checks if a delete notification was already sent
 
 // SendWebhookNotification sends a notification to a webhook
 func SendWebhookNotification(message string) error {
@@ -524,22 +474,23 @@ func SendWebhookNotification(message string) error {
 }
 
 // handleTTL processes a resource's TTL annotation or matching rules
-func (j *Janitor) handleTTL(ctx context.Context, obj metav1.Object, counter map[string]int) error {
-	annotations := obj.GetAnnotations()
-	if annotations == nil {
-		j.debugLog("Resource %s/%s has no annotations", obj.GetNamespace(), obj.GetName())
+func (j *Janitor) handleTTL(ctx context.Context, t Target, counter map[string]int) error {
+	// Preserved as-is: a resource with no annotations at all never reaches rule
+	// evaluation. That is a bug, fixed when the three decisions collapse.
+	if t.Annotations == nil {
+		j.debugLog("Resource %s/%s has no annotations", t.Namespace, t.Name)
 		return nil
 	}
 
 	// Check for TTL annotation
-	ttl, hasTTL := annotations[TTLAnnotation]
+	ttl, hasTTL := t.Annotations[TTLAnnotation]
 	if !hasTTL {
-		j.debugLog("Resource %s/%s has no TTL annotation, checking rules", obj.GetNamespace(), obj.GetName())
+		j.debugLog("Resource %s/%s has no TTL annotation, checking rules", t.Namespace, t.Name)
 		// No TTL annotation, check if any rules match
-		return j.handleRules(ctx, obj, counter)
+		return j.handleRules(ctx, t, counter)
 	}
 
-	j.infoLog("Resource %s/%s has TTL annotation: %s", obj.GetNamespace(), obj.GetName(), ttl)
+	j.infoLog("Resource %s/%s has TTL annotation: %s", t.Namespace, t.Name, ttl)
 
 	// Parse TTL
 	ttlDuration, err := ParseTTL(ttl)
@@ -549,65 +500,42 @@ func (j *Janitor) handleTTL(ctx context.Context, obj metav1.Object, counter map[
 
 	// TTL of -1 means "forever", so skip
 	if ttlDuration < 0 {
-		j.debugLog("Resource %s/%s has unlimited TTL, skipping", obj.GetNamespace(), obj.GetName())
+		j.debugLog("Resource %s/%s has unlimited TTL, skipping", t.Namespace, t.Name)
 		return nil
 	}
 
-	// Get deployment time
-	var deploymentTime time.Time
-	if j.config.DeploymentTimeAnnotation != "" {
-		if deployTimeStr, ok := annotations[j.config.DeploymentTimeAnnotation]; ok {
-			if t, err := time.Parse(time.RFC3339, deployTimeStr); err == nil {
-				deploymentTime = t
-				j.debugLog("Using deployment time from annotation: %s", deploymentTime)
-			}
-		}
-	}
-
-	// If no deployment time annotation or couldn't parse it, use creation timestamp
-	if deploymentTime.IsZero() {
-		deploymentTime = obj.GetCreationTimestamp().Time
-		j.debugLog("Using creation timestamp as deployment time: %s", deploymentTime)
-	}
+	deploymentTime := j.deploymentTime(t)
 
 	// Calculate expiry time
 	expiryTime := deploymentTime.Add(ttlDuration)
-	j.infoLog("Resource %s/%s expires at: %s", obj.GetNamespace(), obj.GetName(), expiryTime)
+	j.infoLog("Resource %s/%s expires at: %s", t.Namespace, t.Name, expiryTime)
 
 	// Check if resource has expired
 	if time.Now().After(expiryTime) {
-		j.infoLog("Resource %s/%s has expired, will be deleted", obj.GetNamespace(), obj.GetName())
-		// Get kind using type assertion
-		kind := "Unknown"
-		if u, ok := obj.(*unstructured.Unstructured); ok {
-			kind = u.GetKind()
-		}
+		j.infoLog("Resource %s/%s has expired, will be deleted", t.Namespace, t.Name)
 
-		message := fmt.Sprintf("%s %s/%s expired on %s and will be deleted (TTL %s from %s)",
-			kind,
-			obj.GetNamespace(),
-			obj.GetName(),
+		message := fmt.Sprintf("%s expired on %s and will be deleted (TTL %s from %s)",
+			t.describe(),
 			expiryTime.Format(time.RFC3339),
 			ttl,
 			deploymentTime.Format(time.RFC3339))
 
-		if err := j.createEvent(ctx, obj, message, "TTLExpired"); err != nil {
+		if err := j.createEvent(ctx, t, message, "TTLExpired"); err != nil {
 			return fmt.Errorf("failed to create event: %v", err)
 		}
 
-		if err := j.deleteResource(ctx, obj); err != nil {
+		if err := j.deleteResource(ctx, t); err != nil {
 			return fmt.Errorf("failed to delete resource: %v", err)
 		}
 
-		resourceType := fmt.Sprintf("%ss", strings.ToLower(kind))
-		counter[resourceType+"-deleted"]++
+		counter[t.GVR.Resource+"-deleted"]++
 	} else if j.config.DeleteNotification > 0 {
 		// Send notification if configured and not already notified
 		notificationTime := expiryTime.Add(-time.Duration(j.config.DeleteNotification) * time.Second)
-		j.debugLog("Resource %s/%s notification time: %s", obj.GetNamespace(), obj.GetName(), notificationTime)
-		if time.Now().After(notificationTime) && !j.wasNotified(obj) {
-			j.infoLog("Sending delete notification for resource %s/%s", obj.GetNamespace(), obj.GetName())
-			if err := j.sendDeleteNotification(ctx, obj, fmt.Sprintf("TTL %s from %s", ttl, deploymentTime.Format(time.RFC3339)), expiryTime); err != nil {
+		j.debugLog("Resource %s/%s notification time: %s", t.Namespace, t.Name, notificationTime)
+		if time.Now().After(notificationTime) && !t.wasNotified() {
+			j.infoLog("Sending delete notification for resource %s/%s", t.Namespace, t.Name)
+			if err := j.sendDeleteNotification(ctx, t, fmt.Sprintf("TTL %s from %s", ttl, deploymentTime.Format(time.RFC3339)), expiryTime); err != nil {
 				return fmt.Errorf("failed to send delete notification: %v", err)
 			}
 		}
@@ -616,40 +544,44 @@ func (j *Janitor) handleTTL(ctx context.Context, obj metav1.Object, counter map[
 	return nil
 }
 
+// deploymentTime returns the moment a target's lifetime counts from: the
+// configured deployment time annotation when present and parseable, and the
+// creation timestamp otherwise.
+func (j *Janitor) deploymentTime(t Target) time.Time {
+	if j.config.DeploymentTimeAnnotation != "" {
+		if raw, ok := t.Annotations[j.config.DeploymentTimeAnnotation]; ok {
+			if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+				j.debugLog("Using deployment time from annotation: %s", parsed)
+				return parsed
+			}
+		}
+	}
+
+	j.debugLog("Using creation timestamp as deployment time: %s", t.CreatedAt)
+	return t.CreatedAt
+}
+
 // handleRules checks if any rules match the resource and applies TTL accordingly
-func (j *Janitor) handleRules(ctx context.Context, obj metav1.Object, counter map[string]int) error {
+func (j *Janitor) handleRules(ctx context.Context, t Target, counter map[string]int) error {
 	if len(j.config.Rules) == 0 {
-		j.debugLog("No rules configured, skipping rule evaluation for %s/%s", obj.GetNamespace(), obj.GetName())
+		j.debugLog("No rules configured, skipping rule evaluation for %s/%s", t.Namespace, t.Name)
 		return nil
 	}
 
-	// Convert resource to map for JMESPath evaluation
-	resourceMap, err := j.objectToMap(obj)
-	if err != nil {
-		return fmt.Errorf("failed to convert resource to map: %v", err)
-	}
-
-	j.debugLog("Evaluating %d rules for resource %s/%s", len(j.config.Rules), obj.GetNamespace(), obj.GetName())
+	j.debugLog("Evaluating %d rules for resource %s/%s", len(j.config.Rules), t.Namespace, t.Name)
 
 	// Get resource context
-	context, err := j.getResourceContext(ctx, obj)
+	resourceContext, err := j.getResourceContext(ctx, t)
 	if err != nil {
-		// Get kind using type assertion
-		kind := "Unknown"
-		if u, ok := obj.(*unstructured.Unstructured); ok {
-			kind = u.GetKind()
-		}
-
-		log.Printf("Warning: failed to get context for %s %s/%s: %v",
-			kind, obj.GetNamespace(), obj.GetName(), err)
-		context = make(map[string]interface{})
+		log.Printf("Warning: failed to get context for %s: %v", t.describe(), err)
+		resourceContext = make(map[string]interface{})
 	}
 
 	// Check each rule
 	for _, rule := range j.config.Rules {
-		j.debugLog("Checking rule %s for resource %s/%s", rule.ID, obj.GetNamespace(), obj.GetName())
-		if rule.Matches(resourceMap, context) {
-			j.infoLog("Rule %s matched resource %s/%s", rule.ID, obj.GetNamespace(), obj.GetName())
+		j.debugLog("Checking rule %s for resource %s/%s", rule.ID, t.Namespace, t.Name)
+		if rule.Matches(t.Raw, resourceContext) {
+			j.infoLog("Rule %s matched resource %s/%s", rule.ID, t.Namespace, t.Name)
 			// Parse TTL
 			ttlDuration, err := ParseTTL(rule.TTL)
 			if err != nil {
@@ -662,70 +594,44 @@ func (j *Janitor) handleRules(ctx context.Context, obj metav1.Object, counter ma
 				continue
 			}
 
-			// Get deployment time
-			var deploymentTime time.Time
-			if j.config.DeploymentTimeAnnotation != "" {
-				annotations := obj.GetAnnotations()
-				if annotations != nil {
-					if deployTimeStr, ok := annotations[j.config.DeploymentTimeAnnotation]; ok {
-						if t, err := time.Parse(time.RFC3339, deployTimeStr); err == nil {
-							deploymentTime = t
-							j.debugLog("Using deployment time from annotation: %s", deploymentTime)
-						}
-					}
-				}
-			}
-
-			// If no deployment time annotation or couldn't parse it, use creation timestamp
-			if deploymentTime.IsZero() {
-				deploymentTime = obj.GetCreationTimestamp().Time
-				j.debugLog("Using creation timestamp as deployment time: %s", deploymentTime)
-			}
+			deploymentTime := j.deploymentTime(t)
 
 			// Calculate expiry time
 			expiryTime := deploymentTime.Add(ttlDuration)
 			j.infoLog("Resource %s/%s expires at: %s based on rule %s",
-				obj.GetNamespace(), obj.GetName(), expiryTime, rule.ID)
+				t.Namespace, t.Name, expiryTime, rule.ID)
 
 			// Check if resource has expired
 			if time.Now().After(expiryTime) {
 				j.infoLog("Resource %s/%s has expired based on rule %s, will be deleted",
-					obj.GetNamespace(), obj.GetName(), rule.ID)
-				// Get kind using type assertion
-				kind := "Unknown"
-				if u, ok := obj.(*unstructured.Unstructured); ok {
-					kind = u.GetKind()
-				}
+					t.Namespace, t.Name, rule.ID)
 
-				message := fmt.Sprintf("%s %s/%s expired on %s and will be deleted (rule %s, TTL %s from %s)",
-					kind,
-					obj.GetNamespace(),
-					obj.GetName(),
+				message := fmt.Sprintf("%s expired on %s and will be deleted (rule %s, TTL %s from %s)",
+					t.describe(),
 					expiryTime.Format(time.RFC3339),
 					rule.ID,
 					rule.TTL,
 					deploymentTime.Format(time.RFC3339))
 
-				if err := j.createEvent(ctx, obj, message, "RuleTTLExpired"); err != nil {
+				if err := j.createEvent(ctx, t, message, "RuleTTLExpired"); err != nil {
 					return fmt.Errorf("failed to create event: %v", err)
 				}
 
-				if err := j.deleteResource(ctx, obj); err != nil {
+				if err := j.deleteResource(ctx, t); err != nil {
 					return fmt.Errorf("failed to delete resource: %v", err)
 				}
 
-				resourceType := fmt.Sprintf("%ss", strings.ToLower(kind))
-				counter[resourceType+"-deleted"]++
+				counter[t.GVR.Resource+"-deleted"]++
 				return nil
 			} else if j.config.DeleteNotification > 0 {
 				// Send notification if configured and not already notified
 				notificationTime := expiryTime.Add(-time.Duration(j.config.DeleteNotification) * time.Second)
 				j.debugLog("Rule %s notification time for resource %s/%s: %s",
-					rule.ID, obj.GetNamespace(), obj.GetName(), notificationTime)
-				if time.Now().After(notificationTime) && !j.wasNotified(obj) {
+					rule.ID, t.Namespace, t.Name, notificationTime)
+				if time.Now().After(notificationTime) && !t.wasNotified() {
 					j.infoLog("Sending delete notification for resource %s/%s based on rule %s",
-						obj.GetNamespace(), obj.GetName(), rule.ID)
-					if err := j.sendDeleteNotification(ctx, obj, fmt.Sprintf("rule %s, TTL %s from %s", rule.ID, rule.TTL, deploymentTime.Format(time.RFC3339)), expiryTime); err != nil {
+						t.Namespace, t.Name, rule.ID)
+					if err := j.sendDeleteNotification(ctx, t, fmt.Sprintf("rule %s, TTL %s from %s", rule.ID, rule.TTL, deploymentTime.Format(time.RFC3339)), expiryTime); err != nil {
 						return fmt.Errorf("failed to send delete notification: %v", err)
 					}
 				}
@@ -739,84 +645,26 @@ func (j *Janitor) handleRules(ctx context.Context, obj metav1.Object, counter ma
 	return nil
 }
 
-// objectToMap converts a Kubernetes object to a map for JMESPath evaluation
-func (j *Janitor) objectToMap(obj metav1.Object) (map[string]interface{}, error) {
-	// For unstructured objects, we can just use the Object field
-	if u, ok := obj.(*unstructured.Unstructured); ok {
-		return u.Object, nil
-	}
-
-	// For other objects, we need to convert them to JSON and then unmarshal to a map
-	data, err := json.Marshal(obj)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal object: %v", err)
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal object: %v", err)
-	}
-
-	return result, nil
-}
-
-func (j *Janitor) deleteResource(ctx context.Context, obj metav1.Object) error {
+func (j *Janitor) deleteResource(ctx context.Context, t Target) error {
 	if j.config.DryRun {
-		// Get kind using type assertion
-		kind := "Unknown"
-		if u, ok := obj.(*unstructured.Unstructured); ok {
-			kind = u.GetKind()
-		} else if _, ok := obj.(*corev1.Namespace); ok {
-			kind = "Namespace"
-		}
-
-		log.Printf("**DRY-RUN**: Would delete %s %s/%s",
-			kind,
-			obj.GetNamespace(),
-			obj.GetName())
+		log.Printf("**DRY-RUN**: Would delete %s", t.describe())
 		j.debugLog("Resource would be deleted with propagation policy: Background")
 		return nil
-	}
-
-	// Get GVR using type assertion
-	var gvr schema.GroupVersionResource
-
-	if u, ok := obj.(*unstructured.Unstructured); ok {
-		gvk := u.GroupVersionKind()
-		gvr = schema.GroupVersionResource{
-			Group:    gvk.Group,
-			Version:  gvk.Version,
-			Resource: strings.ToLower(gvk.Kind) + "s",
-		}
-	} else if _, ok := obj.(*corev1.Namespace); ok {
-		// Handle namespace objects specifically
-		gvr = schema.GroupVersionResource{
-			Group:    "",
-			Version:  "v1",
-			Resource: "namespaces",
-		}
-	} else {
-		// Default to core/v1 if we can't determine the GVR
-		gvr = schema.GroupVersionResource{
-			Group:    "",
-			Version:  "v1",
-			Resource: strings.ToLower("Unknown") + "s",
-		}
 	}
 
 	deleteOptions := metav1.DeleteOptions{
 		PropagationPolicy: &[]metav1.DeletionPropagation{metav1.DeletePropagationBackground}[0],
 	}
 
-	if obj.GetNamespace() != "" {
-		j.infoLog("Deleting namespaced resource %s/%s", obj.GetNamespace(), obj.GetName())
-		err := j.dynamicClient.Resource(gvr).Namespace(obj.GetNamespace()).Delete(ctx, obj.GetName(), deleteOptions)
+	if t.Namespace != "" {
+		j.infoLog("Deleting namespaced resource %s/%s", t.Namespace, t.Name)
+		err := j.dynamicClient.Resource(t.GVR).Namespace(t.Namespace).Delete(ctx, t.Name, deleteOptions)
 		if err != nil {
 			return fmt.Errorf("failed to delete resource: %v", err)
 		}
 	} else {
-		j.infoLog("Deleting cluster-scoped resource %s", obj.GetName())
-		err := j.dynamicClient.Resource(gvr).Delete(ctx, obj.GetName(), deleteOptions)
+		j.infoLog("Deleting cluster-scoped resource %s", t.Name)
+		err := j.dynamicClient.Resource(t.GVR).Delete(ctx, t.Name, deleteOptions)
 		if err != nil {
 			return fmt.Errorf("failed to delete resource: %v", err)
 		}
@@ -830,47 +678,32 @@ func (j *Janitor) deleteResource(ctx context.Context, obj metav1.Object) error {
 	return nil
 }
 
-func (j *Janitor) wasNotified(obj metav1.Object) bool {
-	annotations := obj.GetAnnotations()
-	if annotations == nil {
-		return false
-	}
-	_, notified := annotations[NotifiedAnnotation]
-	return notified
-}
-
 // logCleanupSummary logs the summary of a cleanup run
 
 func (j *Janitor) handleResource(ctx context.Context, resource metav1.Object, counter map[string]int, alreadySeen map[string]bool) error {
-	// Get kind using type assertion
-	kind := "Unknown"
-	if u, ok := resource.(*unstructured.Unstructured); ok {
-		kind = u.GetKind()
-	} else if _, ok := resource.(*corev1.Namespace); ok {
-		kind = "Namespace"
+	t, err := newTarget(resource)
+	if err != nil {
+		return fmt.Errorf("failed to read resource: %v", err)
 	}
 
-	j.debugLog("Processing resource: %s/%s/%s", kind, resource.GetNamespace(), resource.GetName())
+	j.debugLog("Processing resource: %s", t.describe())
 
 	if !j.matchesResourceFilter(resource) {
-		j.debugLog("Resource %s/%s/%s does not match filters, skipping",
-			kind, resource.GetNamespace(), resource.GetName())
+		j.debugLog("Resource %s does not match filters, skipping", t.describe())
 		return nil
 	}
 
 	// Increment counter
 	counter["resources-processed"]++
 
-	j.debugLog("Checking TTL for resource: %s/%s/%s",
-		kind, resource.GetNamespace(), resource.GetName())
+	j.debugLog("Checking TTL for resource: %s", t.describe())
 
-	if err := j.handleTTL(ctx, resource, counter); err != nil {
+	if err := j.handleTTL(ctx, t, counter); err != nil {
 		return fmt.Errorf("failed to handle TTL: %v", err)
 	}
 
-	j.debugLog("Checking expiry for resource: %s/%s/%s",
-		kind, resource.GetNamespace(), resource.GetName())
-	if err := j.handleExpiry(ctx, resource, counter); err != nil {
+	j.debugLog("Checking expiry for resource: %s", t.describe())
+	if err := j.handleExpiry(ctx, t, counter); err != nil {
 		return fmt.Errorf("failed to handle expiry: %v", err)
 	}
 
@@ -917,7 +750,7 @@ func (j *Janitor) processResourcesSerially(ctx context.Context, resources []meta
 	j.debugLog("Processing %d resources serially", len(resources))
 
 	alreadySeen := make(map[string]bool)
-	
+
 	for _, resource := range resources {
 		// Check for context cancellation before processing each resource
 		select {
@@ -935,7 +768,7 @@ func (j *Janitor) processResourcesSerially(ctx context.Context, resources []meta
 			kind = "Namespace"
 		}
 		key := fmt.Sprintf("%s/%s/%s", kind, resource.GetNamespace(), resource.GetName())
-		
+
 		if alreadySeen[key] {
 			j.debugLog("Skipping already processed resource: %s", key)
 			continue

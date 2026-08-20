@@ -130,7 +130,7 @@ func TestGetPVCContext(t *testing.T) {
 
 			// Get PVC context
 			ctx := context.Background()
-			got, err := j.getPVCContext(ctx, tt.pvc)
+			got, err := j.getPVCContext(ctx, mustTarget(t, tt.pvc))
 			if err != nil {
 				t.Fatalf("getPVCContext() error = %v", err)
 			}
@@ -237,7 +237,7 @@ func TestGetResourceContext(t *testing.T) {
 				return
 			}
 
-			got, err := j.getResourceContext(context.Background(), tt.resource)
+			got, err := j.getResourceContext(context.Background(), mustTarget(t, tt.resource))
 			if err != nil {
 				t.Fatalf("getResourceContext() error = %v", err)
 			}
