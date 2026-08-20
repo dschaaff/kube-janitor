@@ -8,11 +8,7 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 )
-
-// Force the kubernetes import to be used
-var _ kubernetes.Interface
 
 // ResourceContextHook is a function that can extend the context with custom information
 type ResourceContextHook func(resource interface{}, cache map[string]interface{}) map[string]interface{}

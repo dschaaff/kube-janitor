@@ -9,9 +9,7 @@ import (
 	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
@@ -107,9 +105,7 @@ func (j *Janitor) CleanUp(ctx context.Context) error {
 
 	j.debugLog("Found %d resource types", len(resourceTypes))
 
-	// Create maps for tracking
 	counter := make(map[string]int)
-	alreadySeen := make(map[string]bool)
 
 	// First handle namespaces if included
 	j.debugLog("Processing namespaces")
@@ -120,7 +116,7 @@ func (j *Janitor) CleanUp(ctx context.Context) error {
 	// Then handle other resources
 	for _, resourceType := range resourceTypes {
 		j.debugLog("Processing resource type: %s", resourceType.Kind)
-		if err := j.cleanupResourceType(ctx, resourceType, counter, alreadySeen); err != nil {
+		if err := j.cleanupResourceType(ctx, resourceType, counter); err != nil {
 			log.Printf("Error cleaning up resource type %s: %v", resourceType.Kind, err)
 			continue
 		}
@@ -132,7 +128,7 @@ func (j *Janitor) CleanUp(ctx context.Context) error {
 }
 
 // cleanupResourceType handles cleanup for a specific resource type
-func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType ResourceType, counter map[string]int, alreadySeen map[string]bool) error {
+func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType ResourceType, counter map[string]int) error {
 	// Skip if resource type is excluded
 	if !j.shouldProcessResourceType(resourceType) {
 		j.debugLog("Skipping excluded resource type: %s", resourceType.Kind)
@@ -314,31 +310,18 @@ func getKubeClient() (kubernetes.Interface, error) {
 	return clientset, nil
 }
 
-func (j *Janitor) handleResource(ctx context.Context, resource metav1.Object, counter map[string]int, alreadySeen map[string]bool) error {
-	t, err := newTarget(resource)
-	if err != nil {
-		return fmt.Errorf("failed to read resource: %v", err)
-	}
-
-	j.debugLog("Processing resource: %s", t.describe())
-
-	if !j.matchesResourceFilter(resource) {
+func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[string]int) error {
+	if !j.matchesResourceFilter(t) {
 		j.debugLog("Resource %s does not match filters, skipping", t.describe())
 		return nil
 	}
 
-	// Increment counter
 	counter["resources-processed"]++
 
 	now := time.Now()
 
 	verdict, err := Decide(t, j.config, now, func() map[string]interface{} {
-		data, err := j.getResourceContext(ctx, t)
-		if err != nil {
-			log.Printf("Warning: failed to get context for %s: %v", t.describe(), err)
-			return map[string]interface{}{}
-		}
-		return data
+		return j.resourceContext(ctx, t)
 	})
 	if err != nil {
 		return err
@@ -362,6 +345,18 @@ func (j *Janitor) handleResource(ctx context.Context, resource metav1.Object, co
 	return nil
 }
 
+// resourceContext resolves the cluster-derived facts rules can test. A lookup
+// failure degrades to an empty context rather than stopping the run, so a rule
+// that tests it simply does not match.
+func (j *Janitor) resourceContext(ctx context.Context, t Target) map[string]interface{} {
+	data, err := j.getResourceContext(ctx, t)
+	if err != nil {
+		log.Printf("Warning: failed to get context for %s: %v", t.describe(), err)
+		return map[string]interface{}{}
+	}
+	return data
+}
+
 func (j *Janitor) cleanupNamespaces(ctx context.Context, counter map[string]int) error {
 	if !stringInSlice("namespaces", j.config.IncludeResources) &&
 		!stringInSlice("all", j.config.IncludeResources) {
@@ -376,19 +371,15 @@ func (j *Janitor) cleanupNamespaces(ctx context.Context, counter map[string]int)
 	}
 	j.debugLog("Found %d namespaces", len(namespaces.Items))
 
-	// Filter namespaces that match our criteria
-	var filteredNamespaces []metav1.Object
+	// handleResource applies the same filter to every target, so there is no
+	// second pass here.
+	candidates := make([]metav1.Object, 0, len(namespaces.Items))
 	for i := range namespaces.Items {
-		ns := &namespaces.Items[i]
-		if j.matchesResourceFilter(ns) {
-			filteredNamespaces = append(filteredNamespaces, ns)
-		} else {
-			j.debugLog("Namespace %s does not match filters, skipping", ns.Name)
-		}
+		candidates = append(candidates, &namespaces.Items[i])
 	}
 
 	// Process namespaces serially
-	j.processResourcesSerially(ctx, filteredNamespaces, counter)
+	j.processResourcesSerially(ctx, candidates, counter)
 
 	return nil
 }
@@ -412,15 +403,14 @@ func (j *Janitor) processResourcesSerially(ctx context.Context, resources []meta
 		default:
 		}
 
-		// Check if already processed
-		kind := "Unknown"
-		if u, ok := resource.(*unstructured.Unstructured); ok {
-			kind = u.GetKind()
-		} else if _, ok := resource.(*corev1.Namespace); ok {
-			kind = "Namespace"
+		t, err := newTarget(resource)
+		if err != nil {
+			log.Printf("Error reading resource %s/%s: %v",
+				resource.GetNamespace(), resource.GetName(), err)
+			continue
 		}
-		key := fmt.Sprintf("%s/%s/%s", kind, resource.GetNamespace(), resource.GetName())
 
+		key := t.describe()
 		if alreadySeen[key] {
 			j.debugLog("Skipping already processed resource: %s", key)
 			continue
@@ -429,9 +419,8 @@ func (j *Janitor) processResourcesSerially(ctx context.Context, resources []meta
 
 		j.debugLog("Processing resource: %s", key)
 
-		if err := j.handleResource(ctx, resource, counter, alreadySeen); err != nil {
-			log.Printf("Error handling %s %s/%s: %v",
-				kind, resource.GetNamespace(), resource.GetName(), err)
+		if err := j.handleResource(ctx, t, counter); err != nil {
+			log.Printf("Error handling %s: %v", key, err)
 		}
 	}
 
@@ -459,24 +448,17 @@ func (j *Janitor) logCleanupSummary(counter map[string]int) {
 }
 
 // matchesResourceFilter checks if a resource matches the configured filters
-func (j *Janitor) matchesResourceFilter(obj metav1.Object) bool {
-	// Get kind using type assertion
-	kind := "Unknown"
-	if u, ok := obj.(*unstructured.Unstructured); ok {
-		kind = u.GetKind()
-	} else if ns, ok := obj.(*corev1.Namespace); ok {
-		kind = "Namespace"
-		_ = ns // avoid unused variable warning
-	}
+func (j *Janitor) matchesResourceFilter(t Target) bool {
+	kind := t.Kind
+	name := t.Name
 
-	namespace := obj.GetNamespace()
-	name := obj.GetName()
-
+	// A namespace is its own namespace for filtering purposes.
+	namespace := t.Namespace
 	if kind == "Namespace" {
 		namespace = name
 	}
 
-	resourceType := strings.ToLower(kind) + "s"
+	resourceType := t.GVR.Resource
 
 	// Check if resource type is explicitly excluded
 	for _, excluded := range j.config.ExcludeResources {

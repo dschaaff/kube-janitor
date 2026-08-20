@@ -155,38 +155,6 @@ func TestGetResourceContext(t *testing.T) {
 		setup    func(*testing.T, *Janitor)
 	}{
 		{
-			name: "pvc with no hook",
-			resource: &corev1.PersistentVolumeClaim{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "test-pvc",
-					Namespace: "default",
-				},
-				TypeMeta: metav1.TypeMeta{
-					Kind: "PersistentVolumeClaim",
-				},
-			},
-			want: map[string]interface{}{
-				"pvc_is_not_mounted":    true,
-				"pvc_is_not_referenced": true,
-			},
-			setup: func(t *testing.T, j *Janitor) {
-				// Create the PVC in the fake client
-				_, err := j.client.CoreV1().PersistentVolumeClaims("default").Create(
-					context.Background(),
-					&corev1.PersistentVolumeClaim{
-						ObjectMeta: metav1.ObjectMeta{
-							Name:      "test-pvc",
-							Namespace: "default",
-						},
-					},
-					metav1.CreateOptions{},
-				)
-				if err != nil {
-					t.Fatalf("Failed to create PVC: %v", err)
-				}
-			},
-		},
-		{
 			name: "resource with hook",
 			resource: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
@@ -218,23 +186,6 @@ func TestGetResourceContext(t *testing.T) {
 			// Run setup if provided
 			if tt.setup != nil {
 				tt.setup(t, j)
-			}
-
-			// For PVC tests, we need to manually set the context values since the fake client
-			// doesn't fully implement all the required functionality
-			if _, ok := tt.resource.(*corev1.PersistentVolumeClaim); ok {
-				// Instead of using getPVCContext, directly add the expected values to the result
-				got := make(map[string]interface{})
-				got["pvc_is_not_mounted"] = tt.want["pvc_is_not_mounted"]
-				got["pvc_is_not_referenced"] = tt.want["pvc_is_not_referenced"]
-
-				// Compare results
-				for k, v := range tt.want {
-					if got[k] != v {
-						t.Errorf("getResourceContext()[%q] = %v, want %v", k, got[k], v)
-					}
-				}
-				return
 			}
 
 			got, err := j.getResourceContext(context.Background(), mustTarget(t, tt.resource))
