@@ -48,6 +48,19 @@ func mustRules(t *testing.T, rules ...Rule) []Rule {
 	return rules
 }
 
+func TestActionString(t *testing.T) {
+	for action, want := range map[Action]string{
+		ActionNone:   "none",
+		ActionDelete: "delete",
+		ActionNotify: "notify",
+		Action(99):   "none",
+	} {
+		if got := action.String(); got != want {
+			t.Errorf("Action(%d).String() = %q, want %q", action, got, want)
+		}
+	}
+}
+
 func TestDecideAction(t *testing.T) {
 	matchAll := func(id, ttl string) Rule {
 		return Rule{ID: id, Resources: []string{"*"}, JMESPath: "metadata.name", TTL: ttl}

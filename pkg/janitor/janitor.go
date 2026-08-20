@@ -1,12 +1,9 @@
 package janitor
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,38 +80,6 @@ func getDynamicClient() (dynamic.Interface, error) {
 	}
 
 	return dynamicClient, nil
-}
-
-// sendDeleteNotification sends a notification about upcoming resource deletion
-func (j *Janitor) sendDeleteNotification(ctx context.Context, t Target, verdict Verdict) error {
-	if j.config.DryRun {
-		log.Printf("**DRY-RUN**: Would send delete notification for %s", t.describe())
-		j.debugLog("Notification: %s", verdict.Message)
-		return nil
-	}
-
-	message := verdict.Message
-	if contextName := os.Getenv("CONTEXT_NAME"); contextName != "" {
-		message = "[" + contextName + "] " + message
-	}
-
-	if err := j.createEvent(ctx, t, message, verdict.EventReason); err != nil {
-		return err
-	}
-
-	if err := SendWebhookNotification(message); err != nil {
-		log.Printf("Failed to send webhook notification: %v", err)
-	}
-
-	// Flags the target as notified for the rest of this run only. Nothing writes
-	// the annotation back to the cluster, so notifications re-fire on the next
-	// run. Fixing that needs the "patch" verb, which deploy/rbac.yaml does not
-	// grant.
-	if t.Annotations != nil {
-		t.Annotations[NotifiedAnnotation] = "yes"
-	}
-
-	return nil
 }
 
 // debugLog logs a message if debug mode is enabled
@@ -349,114 +314,6 @@ func getKubeClient() (kubernetes.Interface, error) {
 	return clientset, nil
 }
 
-// createEvent creates a Kubernetes event for the given resource
-func (j *Janitor) createEvent(ctx context.Context, t Target, message string, reason string) error {
-	if j.config.DryRun {
-		log.Printf("**DRY-RUN**: Would create event: %s", message)
-		return nil
-	}
-
-	// Determine event namespace - use fallback for cluster-scoped resources
-	eventNamespace := t.Namespace
-	if eventNamespace == "" {
-		eventNamespace = "default"
-	}
-
-	now := time.Now()
-	event := &corev1.Event{
-		ObjectMeta: metav1.ObjectMeta{
-			GenerateName: "kube-janitor-",
-			Namespace:    eventNamespace,
-		},
-		InvolvedObject: corev1.ObjectReference{
-			APIVersion: t.APIVersion,
-			Kind:       t.Kind,
-			Name:       t.Name,
-			Namespace:  t.Namespace,
-			UID:        t.UID,
-		},
-		Reason:         reason,
-		Message:        message,
-		FirstTimestamp: metav1.NewTime(now),
-		LastTimestamp:  metav1.NewTime(now),
-		Count:          1,
-		Type:           "Normal",
-		Source: corev1.EventSource{
-			Component: "kube-janitor",
-		},
-	}
-
-	_, err := j.client.CoreV1().Events(eventNamespace).Create(ctx, event, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to create event: %v", err)
-	}
-
-	return nil
-}
-
-func SendWebhookNotification(message string) error {
-	webhookURL := os.Getenv("WEBHOOK_URL")
-	if webhookURL == "" {
-		return nil
-	}
-
-	payload := WebhookMessage{
-		Message: message,
-	}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal webhook payload: %v", err)
-	}
-
-	resp, err := http.Post(webhookURL, "application/json", bytes.NewBuffer(data))
-	if err != nil {
-		return fmt.Errorf("failed to send webhook: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook returned non-success status: %s", resp.Status)
-	}
-
-	return nil
-}
-
-func (j *Janitor) deleteResource(ctx context.Context, t Target) error {
-	if j.config.DryRun {
-		log.Printf("**DRY-RUN**: Would delete %s", t.describe())
-		j.debugLog("Resource would be deleted with propagation policy: Background")
-		return nil
-	}
-
-	deleteOptions := metav1.DeleteOptions{
-		PropagationPolicy: &[]metav1.DeletionPropagation{metav1.DeletePropagationBackground}[0],
-	}
-
-	if t.Namespace != "" {
-		j.infoLog("Deleting namespaced resource %s/%s", t.Namespace, t.Name)
-		err := j.dynamicClient.Resource(t.GVR).Namespace(t.Namespace).Delete(ctx, t.Name, deleteOptions)
-		if err != nil {
-			return fmt.Errorf("failed to delete resource: %v", err)
-		}
-	} else {
-		j.infoLog("Deleting cluster-scoped resource %s", t.Name)
-		err := j.dynamicClient.Resource(t.GVR).Delete(ctx, t.Name, deleteOptions)
-		if err != nil {
-			return fmt.Errorf("failed to delete resource: %v", err)
-		}
-	}
-
-	if j.config.WaitAfterDelete > 0 {
-		j.infoLog("Waiting %d seconds after delete", j.config.WaitAfterDelete)
-		time.Sleep(time.Duration(j.config.WaitAfterDelete) * time.Second)
-	}
-
-	return nil
-}
-
-// logCleanupSummary logs the summary of a cleanup run
-
 func (j *Janitor) handleResource(ctx context.Context, resource metav1.Object, counter map[string]int, alreadySeen map[string]bool) error {
 	t, err := newTarget(resource)
 	if err != nil {
@@ -487,30 +344,19 @@ func (j *Janitor) handleResource(ctx context.Context, resource metav1.Object, co
 		return err
 	}
 
-	switch verdict.Action {
-	case ActionDelete:
-		j.infoLog("%s reached its deadline %s (%s), deleting",
-			t.describe(), verdict.Deadline.Format(time.RFC3339), verdict.Source)
-
-		if err := j.createEvent(ctx, t, verdict.Message, verdict.EventReason); err != nil {
-			return fmt.Errorf("failed to create event: %v", err)
-		}
-		if err := j.deleteResource(ctx, t); err != nil {
-			return fmt.Errorf("failed to delete resource: %v", err)
-		}
-
-		counter[t.GVR.Resource+"-deleted"]++
-
-	case ActionNotify:
-		j.infoLog("%s is due for deletion at %s (%s), notifying",
-			t.describe(), verdict.Deadline.Format(time.RFC3339), verdict.Source)
-
-		if err := j.sendDeleteNotification(ctx, t, verdict); err != nil {
-			return fmt.Errorf("failed to send delete notification: %v", err)
-		}
-
-	default:
+	if verdict.Action == ActionNone {
 		j.debugLog("%s: nothing to do (%s)", t.describe(), verdict.Source)
+	} else {
+		j.infoLog("%s: %s, deadline %s (%s)", t.describe(), verdict.Action,
+			verdict.Deadline.Format(time.RFC3339), verdict.Source)
+	}
+
+	if err := j.Apply(ctx, t, verdict, now); err != nil {
+		return err
+	}
+
+	if verdict.Action == ActionDelete {
+		counter[t.GVR.Resource+"-deleted"]++
 	}
 
 	return nil
