@@ -86,30 +86,19 @@ func getDynamicClient() (dynamic.Interface, error) {
 }
 
 // sendDeleteNotification sends a notification about upcoming resource deletion
-func (j *Janitor) sendDeleteNotification(ctx context.Context, t Target, reason string, expiryTime time.Time) error {
+func (j *Janitor) sendDeleteNotification(ctx context.Context, t Target, verdict Verdict) error {
 	if j.config.DryRun {
 		log.Printf("**DRY-RUN**: Would send delete notification for %s", t.describe())
-		j.debugLog("Notification reason: %s, expiry time: %s", reason, expiryTime)
+		j.debugLog("Notification: %s", verdict.Message)
 		return nil
 	}
 
-	if t.wasNotified() {
-		return nil
+	message := verdict.Message
+	if contextName := os.Getenv("CONTEXT_NAME"); contextName != "" {
+		message = "[" + contextName + "] " + message
 	}
 
-	contextName := os.Getenv("CONTEXT_NAME")
-	prefix := ""
-	if contextName != "" {
-		prefix = "[" + contextName + "] "
-	}
-
-	message := fmt.Sprintf("%s%s will be deleted at %s (%s)",
-		prefix,
-		t.describe(),
-		expiryTime.Format(time.RFC3339),
-		reason)
-
-	if err := j.createEvent(ctx, t, message, "DeleteNotification"); err != nil {
+	if err := j.createEvent(ctx, t, message, verdict.EventReason); err != nil {
 		return err
 	}
 
@@ -405,46 +394,6 @@ func (j *Janitor) createEvent(ctx context.Context, t Target, message string, rea
 	return nil
 }
 
-// handleExpiry processes a resource's expiry annotation
-func (j *Janitor) handleExpiry(ctx context.Context, t Target, counter map[string]int) error {
-	expiry, ok := t.Annotations[ExpiryAnnotation]
-	if !ok {
-		return nil
-	}
-
-	expiryTime, err := ParseExpiry(expiry)
-	if err != nil {
-		return fmt.Errorf("invalid expiry value: %v", err)
-	}
-
-	if time.Now().After(expiryTime) {
-		message := fmt.Sprintf("%s expired on %s and will be deleted (annotation %s is set)",
-			t.describe(),
-			expiry,
-			ExpiryAnnotation)
-
-		if err := j.createEvent(ctx, t, message, "ExpiryTimeReached"); err != nil {
-			return fmt.Errorf("failed to create event: %v", err)
-		}
-
-		if err := j.deleteResource(ctx, t); err != nil {
-			return fmt.Errorf("failed to delete resource: %v", err)
-		}
-
-		counter[t.GVR.Resource+"-deleted"]++
-	} else if j.config.DeleteNotification > 0 {
-		notificationTime := expiryTime.Add(-time.Duration(j.config.DeleteNotification) * time.Second)
-		if time.Now().After(notificationTime) && !t.wasNotified() {
-			if err := j.sendDeleteNotification(ctx, t, fmt.Sprintf("annotation %s is set", ExpiryAnnotation), expiryTime); err != nil {
-				return fmt.Errorf("failed to send delete notification: %v", err)
-			}
-		}
-	}
-
-	return nil
-}
-
-// SendWebhookNotification sends a notification to a webhook
 func SendWebhookNotification(message string) error {
 	webhookURL := os.Getenv("WEBHOOK_URL")
 	if webhookURL == "" {
@@ -468,178 +417,6 @@ func SendWebhookNotification(message string) error {
 
 	if resp.StatusCode >= 300 {
 		return fmt.Errorf("webhook returned non-success status: %s", resp.Status)
-	}
-
-	return nil
-}
-
-// handleTTL processes a resource's TTL annotation or matching rules
-func (j *Janitor) handleTTL(ctx context.Context, t Target, counter map[string]int) error {
-	// Preserved as-is: a resource with no annotations at all never reaches rule
-	// evaluation. That is a bug, fixed when the three decisions collapse.
-	if t.Annotations == nil {
-		j.debugLog("Resource %s/%s has no annotations", t.Namespace, t.Name)
-		return nil
-	}
-
-	// Check for TTL annotation
-	ttl, hasTTL := t.Annotations[TTLAnnotation]
-	if !hasTTL {
-		j.debugLog("Resource %s/%s has no TTL annotation, checking rules", t.Namespace, t.Name)
-		// No TTL annotation, check if any rules match
-		return j.handleRules(ctx, t, counter)
-	}
-
-	j.infoLog("Resource %s/%s has TTL annotation: %s", t.Namespace, t.Name, ttl)
-
-	// Parse TTL
-	ttlDuration, err := ParseTTL(ttl)
-	if err != nil {
-		return fmt.Errorf("invalid TTL value: %v", err)
-	}
-
-	// TTL of -1 means "forever", so skip
-	if ttlDuration < 0 {
-		j.debugLog("Resource %s/%s has unlimited TTL, skipping", t.Namespace, t.Name)
-		return nil
-	}
-
-	deploymentTime := j.deploymentTime(t)
-
-	// Calculate expiry time
-	expiryTime := deploymentTime.Add(ttlDuration)
-	j.infoLog("Resource %s/%s expires at: %s", t.Namespace, t.Name, expiryTime)
-
-	// Check if resource has expired
-	if time.Now().After(expiryTime) {
-		j.infoLog("Resource %s/%s has expired, will be deleted", t.Namespace, t.Name)
-
-		message := fmt.Sprintf("%s expired on %s and will be deleted (TTL %s from %s)",
-			t.describe(),
-			expiryTime.Format(time.RFC3339),
-			ttl,
-			deploymentTime.Format(time.RFC3339))
-
-		if err := j.createEvent(ctx, t, message, "TTLExpired"); err != nil {
-			return fmt.Errorf("failed to create event: %v", err)
-		}
-
-		if err := j.deleteResource(ctx, t); err != nil {
-			return fmt.Errorf("failed to delete resource: %v", err)
-		}
-
-		counter[t.GVR.Resource+"-deleted"]++
-	} else if j.config.DeleteNotification > 0 {
-		// Send notification if configured and not already notified
-		notificationTime := expiryTime.Add(-time.Duration(j.config.DeleteNotification) * time.Second)
-		j.debugLog("Resource %s/%s notification time: %s", t.Namespace, t.Name, notificationTime)
-		if time.Now().After(notificationTime) && !t.wasNotified() {
-			j.infoLog("Sending delete notification for resource %s/%s", t.Namespace, t.Name)
-			if err := j.sendDeleteNotification(ctx, t, fmt.Sprintf("TTL %s from %s", ttl, deploymentTime.Format(time.RFC3339)), expiryTime); err != nil {
-				return fmt.Errorf("failed to send delete notification: %v", err)
-			}
-		}
-	}
-
-	return nil
-}
-
-// deploymentTime returns the moment a target's lifetime counts from: the
-// configured deployment time annotation when present and parseable, and the
-// creation timestamp otherwise.
-func (j *Janitor) deploymentTime(t Target) time.Time {
-	if j.config.DeploymentTimeAnnotation != "" {
-		if raw, ok := t.Annotations[j.config.DeploymentTimeAnnotation]; ok {
-			if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
-				j.debugLog("Using deployment time from annotation: %s", parsed)
-				return parsed
-			}
-		}
-	}
-
-	j.debugLog("Using creation timestamp as deployment time: %s", t.CreatedAt)
-	return t.CreatedAt
-}
-
-// handleRules checks if any rules match the resource and applies TTL accordingly
-func (j *Janitor) handleRules(ctx context.Context, t Target, counter map[string]int) error {
-	if len(j.config.Rules) == 0 {
-		j.debugLog("No rules configured, skipping rule evaluation for %s/%s", t.Namespace, t.Name)
-		return nil
-	}
-
-	j.debugLog("Evaluating %d rules for resource %s/%s", len(j.config.Rules), t.Namespace, t.Name)
-
-	// Get resource context
-	resourceContext, err := j.getResourceContext(ctx, t)
-	if err != nil {
-		log.Printf("Warning: failed to get context for %s: %v", t.describe(), err)
-		resourceContext = make(map[string]interface{})
-	}
-
-	// Check each rule
-	for _, rule := range j.config.Rules {
-		j.debugLog("Checking rule %s for resource %s/%s", rule.ID, t.Namespace, t.Name)
-		if rule.Matches(t.Raw, resourceContext) {
-			j.infoLog("Rule %s matched resource %s/%s", rule.ID, t.Namespace, t.Name)
-			// Parse TTL
-			ttlDuration, err := ParseTTL(rule.TTL)
-			if err != nil {
-				return fmt.Errorf("invalid TTL in rule %s: %v", rule.ID, err)
-			}
-
-			// TTL of -1 means "forever", so skip
-			if ttlDuration < 0 {
-				j.debugLog("Rule %s has unlimited TTL, skipping", rule.ID)
-				continue
-			}
-
-			deploymentTime := j.deploymentTime(t)
-
-			// Calculate expiry time
-			expiryTime := deploymentTime.Add(ttlDuration)
-			j.infoLog("Resource %s/%s expires at: %s based on rule %s",
-				t.Namespace, t.Name, expiryTime, rule.ID)
-
-			// Check if resource has expired
-			if time.Now().After(expiryTime) {
-				j.infoLog("Resource %s/%s has expired based on rule %s, will be deleted",
-					t.Namespace, t.Name, rule.ID)
-
-				message := fmt.Sprintf("%s expired on %s and will be deleted (rule %s, TTL %s from %s)",
-					t.describe(),
-					expiryTime.Format(time.RFC3339),
-					rule.ID,
-					rule.TTL,
-					deploymentTime.Format(time.RFC3339))
-
-				if err := j.createEvent(ctx, t, message, "RuleTTLExpired"); err != nil {
-					return fmt.Errorf("failed to create event: %v", err)
-				}
-
-				if err := j.deleteResource(ctx, t); err != nil {
-					return fmt.Errorf("failed to delete resource: %v", err)
-				}
-
-				counter[t.GVR.Resource+"-deleted"]++
-				return nil
-			} else if j.config.DeleteNotification > 0 {
-				// Send notification if configured and not already notified
-				notificationTime := expiryTime.Add(-time.Duration(j.config.DeleteNotification) * time.Second)
-				j.debugLog("Rule %s notification time for resource %s/%s: %s",
-					rule.ID, t.Namespace, t.Name, notificationTime)
-				if time.Now().After(notificationTime) && !t.wasNotified() {
-					j.infoLog("Sending delete notification for resource %s/%s based on rule %s",
-						t.Namespace, t.Name, rule.ID)
-					if err := j.sendDeleteNotification(ctx, t, fmt.Sprintf("rule %s, TTL %s from %s", rule.ID, rule.TTL, deploymentTime.Format(time.RFC3339)), expiryTime); err != nil {
-						return fmt.Errorf("failed to send delete notification: %v", err)
-					}
-				}
-			}
-
-			// Only apply the first matching rule
-			break
-		}
 	}
 
 	return nil
@@ -696,15 +473,44 @@ func (j *Janitor) handleResource(ctx context.Context, resource metav1.Object, co
 	// Increment counter
 	counter["resources-processed"]++
 
-	j.debugLog("Checking TTL for resource: %s", t.describe())
+	now := time.Now()
 
-	if err := j.handleTTL(ctx, t, counter); err != nil {
-		return fmt.Errorf("failed to handle TTL: %v", err)
+	verdict, err := Decide(t, j.config, now, func() map[string]interface{} {
+		data, err := j.getResourceContext(ctx, t)
+		if err != nil {
+			log.Printf("Warning: failed to get context for %s: %v", t.describe(), err)
+			return map[string]interface{}{}
+		}
+		return data
+	})
+	if err != nil {
+		return err
 	}
 
-	j.debugLog("Checking expiry for resource: %s", t.describe())
-	if err := j.handleExpiry(ctx, t, counter); err != nil {
-		return fmt.Errorf("failed to handle expiry: %v", err)
+	switch verdict.Action {
+	case ActionDelete:
+		j.infoLog("%s reached its deadline %s (%s), deleting",
+			t.describe(), verdict.Deadline.Format(time.RFC3339), verdict.Source)
+
+		if err := j.createEvent(ctx, t, verdict.Message, verdict.EventReason); err != nil {
+			return fmt.Errorf("failed to create event: %v", err)
+		}
+		if err := j.deleteResource(ctx, t); err != nil {
+			return fmt.Errorf("failed to delete resource: %v", err)
+		}
+
+		counter[t.GVR.Resource+"-deleted"]++
+
+	case ActionNotify:
+		j.infoLog("%s is due for deletion at %s (%s), notifying",
+			t.describe(), verdict.Deadline.Format(time.RFC3339), verdict.Source)
+
+		if err := j.sendDeleteNotification(ctx, t, verdict); err != nil {
+			return fmt.Errorf("failed to send delete notification: %v", err)
+		}
+
+	default:
+		j.debugLog("%s: nothing to do (%s)", t.describe(), verdict.Source)
 	}
 
 	return nil
