@@ -102,7 +102,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("wait-after-delete must be greater than or equal to 0")
 	}
 
-
 	return nil
 }
 

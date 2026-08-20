@@ -30,7 +30,6 @@ func main() {
 	// Parse the comma-separated string flags after flag.Parse()
 	config.ParseStringFlags()
 
-
 	if config.Debug {
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
 	}
@@ -38,7 +37,6 @@ func main() {
 	if config.DryRun {
 		log.Println("Running in dry-run mode")
 	}
-
 
 	// Check for KUBECONFIG environment variable
 	if os.Getenv("KUBECONFIG") == "" {

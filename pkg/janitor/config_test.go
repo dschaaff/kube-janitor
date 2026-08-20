@@ -337,9 +337,9 @@ func TestNamespaceClusterResourcesBug(t *testing.T) {
 	clientset := fake.NewSimpleClientset(testNamespace)
 
 	j := &Janitor{
-		client:       clientset,
-		config:       config,
-		cache:        make(map[string]interface{}),
+		client: clientset,
+		config: config,
+		cache:  make(map[string]interface{}),
 	}
 
 	// Test using the real namespace object (as cleanupNamespaces does)
