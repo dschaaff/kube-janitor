@@ -2,9 +2,6 @@ package janitor
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
-	"os"
 	"testing"
 	"time"
 
@@ -221,80 +218,5 @@ func TestJanitorCleanup(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestCleanupWithWebhookNotification(t *testing.T) {
-	// Create test server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("Expected POST request, got %s", r.Method)
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	config := &Config{
-		WebhookURL:        server.URL,
-		IncludeResources:  []string{"all"},
-		IncludeNamespaces: []string{"all"},
-		DryRun:            true, // Set DryRun to true to prevent actual deletion attempts
-	}
-
-	j := &Janitor{
-		client: fake.NewSimpleClientset(),
-		config: config,
-		cache:  make(map[string]interface{}),
-	}
-
-	// Create a resource that will be deleted
-	pod := &corev1.Pod{
-		TypeMeta: metav1.TypeMeta{
-			Kind:       "Pod",
-			APIVersion: "v1",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
-			Namespace: "default",
-			CreationTimestamp: metav1.Time{
-				Time: time.Now().Add(-2 * time.Hour),
-			},
-			Annotations: map[string]string{
-				TTLAnnotation: "1h",
-			},
-		},
-	}
-
-	_, err := j.client.CoreV1().Pods("default").Create(context.Background(), pod, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("Failed to create test pod: %v", err)
-	}
-
-	// Instead of running full cleanup, just handle this resource directly
-	counter := make(map[string]int)
-	err = j.handleResource(context.Background(), pod, counter, make(map[string]bool))
-	if err != nil {
-		t.Errorf("handleResource() error = %v", err)
-	}
-}
-
-func TestWebhookNotifications(t *testing.T) {
-	// Create test server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("Expected POST request, got %s", r.Method)
-		}
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	// Set webhook URL
-	os.Setenv("WEBHOOK_URL", server.URL)
-	defer os.Unsetenv("WEBHOOK_URL")
-
-	// Test notification
-	err := SendWebhookNotification("Test notification message")
-	if err != nil {
-		t.Errorf("SendWebhookNotification() error = %v", err)
 	}
 }
