@@ -8,7 +8,6 @@ import (
 	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/client-go/kubernetes"
 )
 
@@ -19,18 +18,12 @@ var _ kubernetes.Interface
 type ResourceContextHook func(resource interface{}, cache map[string]interface{}) map[string]interface{}
 
 // getResourceContext returns additional context information for a resource
-func (j *Janitor) getResourceContext(ctx context.Context, resource metav1.Object) (map[string]interface{}, error) {
+func (j *Janitor) getResourceContext(ctx context.Context, t Target) (map[string]interface{}, error) {
 	contextData := make(map[string]interface{})
 
-	// Fix the GetObjectKind issue with type assertion
-	kind := "Unknown"
-	if u, ok := resource.(*unstructured.Unstructured); ok {
-		kind = u.GetKind()
-	}
-
 	// Handle PVC specific context
-	if strings.ToLower(kind) == "persistentvolumeclaim" {
-		pvcContext, err := j.getPVCContext(ctx, resource)
+	if strings.ToLower(t.Kind) == "persistentvolumeclaim" {
+		pvcContext, err := j.getPVCContext(ctx, t)
 		if err != nil {
 			return nil, fmt.Errorf("failed to get PVC context: %v", err)
 		}
@@ -40,7 +33,7 @@ func (j *Janitor) getResourceContext(ctx context.Context, resource metav1.Object
 
 	// Apply resource context hook if configured
 	if j.config.ResourceContextHook != nil {
-		hookData := j.config.ResourceContextHook(resource, j.cache)
+		hookData := j.config.ResourceContextHook(t.Raw, j.cache)
 		for k, v := range hookData {
 			contextData[k] = v
 		}
@@ -50,9 +43,9 @@ func (j *Janitor) getResourceContext(ctx context.Context, resource metav1.Object
 }
 
 // getPVCContext checks if a PVC is mounted by pods or referenced by other resources
-func (j *Janitor) getPVCContext(ctx context.Context, pvc metav1.Object) (*ResourceContext, error) {
-	pvcName := pvc.GetName()
-	namespace := pvc.GetNamespace()
+func (j *Janitor) getPVCContext(ctx context.Context, t Target) (*ResourceContext, error) {
+	pvcName := t.Name
+	namespace := t.Namespace
 
 	isMounted := false
 	isReferenced := false
