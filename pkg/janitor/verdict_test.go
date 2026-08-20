@@ -12,21 +12,31 @@ import (
 // now is the fixed clock every case in this file is judged against.
 var now = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
-// pod builds a target for a pod created at the given age with the given
-// annotations.
+// podObject builds the pod every test in this package uses: staging/web, created
+// at the given age, with the given annotations.
+func podObject(age time.Duration, annotations map[string]string) *unstructured.Unstructured {
+	metadata := map[string]interface{}{
+		"name":              "web",
+		"namespace":         "staging",
+		"uid":               "pod-uid",
+		"creationTimestamp": now.Add(-age).Format(time.RFC3339),
+	}
+	if annotations != nil {
+		metadata["annotations"] = toStringMap(annotations)
+	}
+
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"kind":       "Pod",
+		"apiVersion": "v1",
+		"metadata":   metadata,
+	}}
+}
+
+// pod builds a target for the same pod.
 func pod(t *testing.T, age time.Duration, annotations map[string]string) Target {
 	t.Helper()
 
-	return mustTarget(t, &unstructured.Unstructured{Object: map[string]interface{}{
-		"kind":       "Pod",
-		"apiVersion": "v1",
-		"metadata": map[string]interface{}{
-			"name":              "web",
-			"namespace":         "staging",
-			"creationTimestamp": now.Add(-age).Format(time.RFC3339),
-			"annotations":       toStringMap(annotations),
-		},
-	}})
+	return mustTarget(t, podObject(age, annotations))
 }
 
 func toStringMap(in map[string]string) map[string]interface{} {
@@ -457,12 +467,15 @@ func TestDecideMessages(t *testing.T) {
 		wantMessage     func(t Target) string
 	}{
 		{
-			name:            "expiry deletion quotes the annotation value",
-			target:          pod(t, 0, map[string]string{ExpiryAnnotation: "2026-05-01T00:00:00Z"}),
+			// The raw annotation value is quoted verbatim, not the parsed deadline
+			// reformatted: a date-only annotation stays "2026-05-01" rather than
+			// becoming "2026-05-01T00:00:00Z".
+			name:            "expiry deletion quotes the annotation value verbatim",
+			target:          pod(t, 0, map[string]string{ExpiryAnnotation: "2026-05-01"}),
 			cfg:             &Config{},
 			wantEventReason: "ExpiryTimeReached",
 			wantMessage: func(Target) string {
-				return "Pod staging/web expired on 2026-05-01T00:00:00Z and will be deleted " +
+				return "Pod staging/web expired on 2026-05-01 and will be deleted " +
 					"(annotation janitor/expires is set)"
 			},
 		},

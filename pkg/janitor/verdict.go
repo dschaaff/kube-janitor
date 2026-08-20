@@ -17,6 +17,14 @@ const (
 	ActionNotify
 )
 
+// Wording that never varies, folded by the compiler rather than formatted per
+// resource.
+const (
+	sourceExpiryAnnotation = "annotation " + ExpiryAnnotation
+	sourceTTLAnnotation    = "annotation " + TTLAnnotation
+	expiryDetail           = "annotation " + ExpiryAnnotation + " is set"
+)
+
 func (a Action) String() string {
 	switch a {
 	case ActionDelete:
@@ -75,11 +83,10 @@ func decideFromExpiry(t Target, cfg *Config, now time.Time, expiry string) (Verd
 
 	return conclude(t, cfg, now, deadlineSource{
 		deadline:    deadline,
-		source:      "annotation " + ExpiryAnnotation,
+		source:      sourceExpiryAnnotation,
 		eventReason: "ExpiryTimeReached",
 		// The expiry message quotes the annotation value, not the parsed deadline.
 		expiredOn: expiry,
-		detail:    fmt.Sprintf("annotation %s is set", ExpiryAnnotation),
 	}), nil
 }
 
@@ -91,18 +98,17 @@ func decideFromTTL(t Target, cfg *Config, now time.Time, ttl string) (Verdict, e
 
 	// An unlimited TTL supplies no deadline, and stops rules being considered.
 	if lifetime < 0 {
-		return Verdict{Source: "annotation " + TTLAnnotation}, nil
+		return Verdict{Source: sourceTTLAnnotation}, nil
 	}
 
 	from := deploymentTime(t, cfg)
-	deadline := from.Add(lifetime)
 
 	return conclude(t, cfg, now, deadlineSource{
-		deadline:    deadline,
-		source:      "annotation " + TTLAnnotation,
+		deadline:    from.Add(lifetime),
+		source:      sourceTTLAnnotation,
 		eventReason: "TTLExpired",
-		expiredOn:   deadline.Format(time.RFC3339),
-		detail:      fmt.Sprintf("TTL %s from %s", ttl, from.Format(time.RFC3339)),
+		from:        from,
+		ttl:         ttl,
 	}), nil
 }
 
@@ -133,34 +139,59 @@ func decideFromRules(t Target, cfg *Config, now time.Time, resourceContext func(
 		}
 
 		from := deploymentTime(t, cfg)
-		deadline := from.Add(lifetime)
 
 		return conclude(t, cfg, now, deadlineSource{
-			deadline:    deadline,
+			deadline:    from.Add(lifetime),
 			source:      "rule " + rule.ID,
 			eventReason: "RuleTTLExpired",
-			expiredOn:   deadline.Format(time.RFC3339),
-			detail:      fmt.Sprintf("rule %s, TTL %s from %s", rule.ID, rule.TTL, from.Format(time.RFC3339)),
+			from:        from,
+			ttl:         rule.TTL,
+			ruleID:      rule.ID,
 		}), nil
 	}
 
 	return Verdict{}, nil
 }
 
-// deadlineSource is one resolved deadline and the wording that goes with it.
+// deadlineSource is one resolved deadline and the ingredients for its wording.
 type deadlineSource struct {
 	deadline    time.Time
 	source      string
 	eventReason string
 
-	// expiredOn is what the delete message says the target expired on.
+	// from and ttl describe a relative deadline, and ruleID names the rule that
+	// set it. An empty ttl means the deadline came from the expiry annotation,
+	// whose wording quotes the raw annotation value held in expiredOn.
+	from      time.Time
+	ttl       string
+	ruleID    string
 	expiredOn string
+}
 
-	// detail is the parenthesised fragment both messages quote.
-	detail string
+// detail is the parenthesised fragment both messages quote.
+func (s deadlineSource) detail() string {
+	switch {
+	case s.ruleID != "":
+		return fmt.Sprintf("rule %s, TTL %s from %s", s.ruleID, s.ttl, s.from.Format(time.RFC3339))
+	case s.ttl != "":
+		return fmt.Sprintf("TTL %s from %s", s.ttl, s.from.Format(time.RFC3339))
+	default:
+		return expiryDetail
+	}
+}
+
+// expiredAt is what the delete message says the target expired on.
+func (s deadlineSource) expiredAt() string {
+	if s.expiredOn != "" {
+		return s.expiredOn
+	}
+	return s.deadline.Format(time.RFC3339)
 }
 
 // conclude turns a resolved deadline into a verdict by comparing it to now.
+//
+// Wording is built only for a verdict that acts, so the common case of a
+// deadline still in the future formats nothing.
 func conclude(t Target, cfg *Config, now time.Time, s deadlineSource) Verdict {
 	if now.After(s.deadline) {
 		return Verdict{
@@ -169,7 +200,7 @@ func conclude(t Target, cfg *Config, now time.Time, s deadlineSource) Verdict {
 			Source:      s.source,
 			EventReason: s.eventReason,
 			Message: fmt.Sprintf("%s expired on %s and will be deleted (%s)",
-				t.describe(), s.expiredOn, s.detail),
+				t.describe(), s.expiredAt(), s.detail()),
 		}
 	}
 
@@ -182,7 +213,7 @@ func conclude(t Target, cfg *Config, now time.Time, s deadlineSource) Verdict {
 				Source:      s.source,
 				EventReason: "DeleteNotification",
 				Message: fmt.Sprintf("%s will be deleted at %s (%s)",
-					t.describe(), s.deadline.Format(time.RFC3339), s.detail),
+					t.describe(), s.deadline.Format(time.RFC3339), s.detail()),
 			}
 		}
 	}

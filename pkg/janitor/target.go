@@ -100,8 +100,10 @@ func toMap(obj metav1.Object) (map[string]interface{}, error) {
 }
 
 // describe renders the target the way log messages and events refer to it.
+// Concatenated rather than formatted: it is called for every resource on every
+// run, including for log lines that are discarded.
 func (t Target) describe() string {
-	return fmt.Sprintf("%s %s/%s", t.Kind, t.Namespace, t.Name)
+	return t.Kind + " " + t.Namespace + "/" + t.Name
 }
 
 // wasNotified reports whether a delete notification was already sent.

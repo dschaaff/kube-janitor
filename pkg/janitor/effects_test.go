@@ -10,7 +10,6 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
@@ -28,16 +27,7 @@ type effectsFixture struct {
 func newEffectsFixture(t *testing.T, cfg *Config) effectsFixture {
 	t.Helper()
 
-	obj := &unstructured.Unstructured{Object: map[string]interface{}{
-		"kind":       "Pod",
-		"apiVersion": "v1",
-		"metadata": map[string]interface{}{
-			"name":        "web",
-			"namespace":   "staging",
-			"uid":         "pod-uid",
-			"annotations": map[string]interface{}{TTLAnnotation: "1h"},
-		},
-	}}
+	obj := podObject(time.Hour, map[string]string{TTLAnnotation: "1h"})
 
 	scheme := runtime.NewScheme()
 	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
@@ -169,7 +159,11 @@ func TestApplyStampsEventsWithTheDecisionTime(t *testing.T) {
 	}
 }
 
-func TestApplyNotify(t *testing.T) {
+// webhookServer stands up a webhook endpoint, points WEBHOOK_URL at it, and
+// returns the channel the received message lands on.
+func webhookServer(t *testing.T) <-chan string {
+	t.Helper()
+
 	received := make(chan string, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -184,9 +178,28 @@ func TestApplyNotify(t *testing.T) {
 		received <- payload.Message
 		w.WriteHeader(http.StatusOK)
 	}))
-	defer server.Close()
+	t.Cleanup(server.Close)
 
 	t.Setenv("WEBHOOK_URL", server.URL)
+
+	return received
+}
+
+// awaitWebhook returns the message the webhook received, or fails.
+func awaitWebhook(t *testing.T, received <-chan string) string {
+	t.Helper()
+
+	select {
+	case got := <-received:
+		return got
+	case <-time.After(2 * time.Second):
+		t.Fatal("webhook was not called")
+		return ""
+	}
+}
+
+func TestApplyNotify(t *testing.T) {
+	received := webhookServer(t)
 
 	f := newEffectsFixture(t, &Config{DeleteNotification: 600})
 
@@ -209,13 +222,8 @@ func TestApplyNotify(t *testing.T) {
 		t.Error("pod was deleted on a notify verdict, want it left alone")
 	}
 
-	select {
-	case got := <-received:
-		if got != verdict.Message {
-			t.Errorf("webhook message = %q, want %q", got, verdict.Message)
-		}
-	case <-time.After(2 * time.Second):
-		t.Error("webhook was not called")
+	if got := awaitWebhook(t, received); got != verdict.Message {
+		t.Errorf("webhook message = %q, want %q", got, verdict.Message)
 	}
 
 	// Marks the target so the same run does not notify twice. This is not written
@@ -226,17 +234,7 @@ func TestApplyNotify(t *testing.T) {
 }
 
 func TestApplyNotifyPrefixesContextName(t *testing.T) {
-	received := make(chan string, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var payload WebhookMessage
-		_ = json.Unmarshal(body, &payload)
-		received <- payload.Message
-		w.WriteHeader(http.StatusOK)
-	}))
-	defer server.Close()
-
-	t.Setenv("WEBHOOK_URL", server.URL)
+	received := webhookServer(t)
 	t.Setenv("CONTEXT_NAME", "prod-eu")
 
 	f := newEffectsFixture(t, &Config{DeleteNotification: 600})
@@ -251,13 +249,8 @@ func TestApplyNotifyPrefixesContextName(t *testing.T) {
 		t.Fatalf("Apply() error = %v", err)
 	}
 
-	select {
-	case got := <-received:
-		if want := "[prod-eu] Pod staging/web will be deleted"; got != want {
-			t.Errorf("webhook message = %q, want %q", got, want)
-		}
-	case <-time.After(2 * time.Second):
-		t.Error("webhook was not called")
+	if got, want := awaitWebhook(t, received), "[prod-eu] Pod staging/web will be deleted"; got != want {
+		t.Errorf("webhook message = %q, want %q", got, want)
 	}
 }
 

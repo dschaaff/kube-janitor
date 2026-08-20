@@ -23,22 +23,15 @@ func (j *Janitor) Apply(ctx context.Context, t Target, v Verdict, now time.Time)
 	switch v.Action {
 	case ActionDelete:
 		if err := j.createEvent(ctx, t, v.Message, v.EventReason, now); err != nil {
-			return fmt.Errorf("failed to create event: %v", err)
+			return err
 		}
-		if err := j.deleteResource(ctx, t); err != nil {
-			return fmt.Errorf("failed to delete resource: %v", err)
-		}
-		return nil
+		return j.deleteResource(ctx, t)
 
 	case ActionNotify:
-		if err := j.notify(ctx, t, v, now); err != nil {
-			return fmt.Errorf("failed to send delete notification: %v", err)
-		}
-		return nil
-
-	default:
-		return nil
+		return j.notify(ctx, t, v, now)
 	}
+
+	return nil
 }
 
 // notify warns that a target is about to be deleted.
@@ -123,9 +116,8 @@ func (j *Janitor) deleteResource(ctx context.Context, t Target) error {
 		return nil
 	}
 
-	deleteOptions := metav1.DeleteOptions{
-		PropagationPolicy: &[]metav1.DeletionPropagation{metav1.DeletePropagationBackground}[0],
-	}
+	policy := metav1.DeletePropagationBackground
+	deleteOptions := metav1.DeleteOptions{PropagationPolicy: &policy}
 
 	var err error
 	if t.Namespace != "" {
