@@ -304,12 +304,11 @@ func TestDecideAppliesRulesToUnannotatedResources(t *testing.T) {
 	}
 }
 
-// Pins a pre-existing defect this refactor does not fix. Namespaces are listed
-// through the typed client, which leaves TypeMeta empty, so the raw resource
-// carries no "kind" and Rule.Matches rejects it before evaluating any JMESPath.
-// Rules therefore never match namespaces, which makes the
-// temporary-pr-namespaces example in deploy/rules.yaml a no-op.
-func TestDecideNeverMatchesRulesAgainstNamespaces(t *testing.T) {
+// Namespaces are listed through the typed client, which leaves TypeMeta empty.
+// Matching on the raw resource's "kind" therefore rejected every namespace before
+// any JMESPath ran, which made the temporary-pr-namespaces example in
+// deploy/rules.yaml a no-op. Matching on the listed plural fixes it.
+func TestDecideMatchesRulesAgainstNamespaces(t *testing.T) {
 	target := mustTarget(t, &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:              "pr-42",
@@ -317,18 +316,19 @@ func TestDecideNeverMatchesRulesAgainstNamespaces(t *testing.T) {
 		},
 	}, namespaceResourceType)
 
-	cfg := &Config{Rules: mustRules(t, Rule{
-		ID: "temporary-pr-namespaces", Resources: []string{"*"},
-		JMESPath: "metadata.name", TTL: "1h",
-	})}
+	for _, resources := range [][]string{{"*"}, {"namespaces"}} {
+		cfg := &Config{Rules: mustRules(t, Rule{
+			ID: "temporary-pr-namespaces", Resources: resources,
+			JMESPath: "starts_with(metadata.name, 'pr-')", TTL: "1h",
+		})}
 
-	got, err := Decide(target, cfg, now, nil)
-	if err != nil {
-		t.Fatalf("Decide() error = %v", err)
-	}
-	if got.Action != ActionNone {
-		t.Errorf("Action = %v, want %v -- if this now deletes, the defect is fixed "+
-			"and this test should assert the new behaviour", got.Action, ActionNone)
+		got, err := Decide(target, cfg, now, nil)
+		if err != nil {
+			t.Fatalf("Decide() error = %v", err)
+		}
+		if got.Action != ActionDelete {
+			t.Errorf("resources %v: Action = %v, want %v", resources, got.Action, ActionDelete)
+		}
 	}
 }
 

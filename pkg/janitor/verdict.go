@@ -123,7 +123,7 @@ func decideFromRules(t Target, cfg *Config, now time.Time, resourceContext func(
 	}
 
 	for _, rule := range cfg.Rules {
-		if !rule.Matches(t.Raw, context) {
+		if !rule.Matches(t, context) {
 			continue
 		}
 

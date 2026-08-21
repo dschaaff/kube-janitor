@@ -2,8 +2,9 @@ package janitor
 
 import (
 	"os"
-	"strings"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestRuleValidation(t *testing.T) {
@@ -65,129 +66,95 @@ func TestRuleValidation(t *testing.T) {
 }
 
 func TestRuleMatches(t *testing.T) {
-	// Create a rule with a simpler JMESPath expression
-	rule := Rule{
-		ID:        "test-rule",
-		Resources: []string{"pods"},
-		JMESPath:  "metadata.labels.test == 'true'",
-		TTL:       "7d",
+	ingresses := ResourceType{
+		Group: "networking.k8s.io", Version: "v1",
+		Kind: "Ingress", Plural: "ingresses", Namespaced: true,
 	}
+	services := ResourceType{Version: "v1", Kind: "Service", Plural: "services", Namespaced: true}
 
-	// Manually compile the JMESPath expression
-	if err := rule.ValidateAndCompile(); err != nil {
-		t.Fatalf("Failed to compile rule: %v", err)
+	labelled := func(rt ResourceType, value string) Target {
+		return mustTarget(t, &unstructured.Unstructured{Object: map[string]interface{}{
+			"metadata": map[string]interface{}{
+				"name":      "x",
+				"namespace": "default",
+				"labels":    map[string]interface{}{"test": value},
+			},
+		}}, rt)
 	}
 
 	tests := []struct {
-		name     string
-		resource map[string]interface{}
-		context  map[string]interface{}
-		want     bool
+		name      string
+		resources []string
+		jmespath  string
+		target    Target
+		context   map[string]interface{}
+		want      bool
 	}{
 		{
-			name: "matching resource and context",
-			resource: map[string]interface{}{
-				"kind": "Pod",
-				"metadata": map[string]interface{}{
-					"labels": map[string]interface{}{
-						"test": "true",
-					},
-				},
-			},
-			context: map[string]interface{}{
-				"pvc_is_not_mounted": true,
-			},
-			want: true,
+			name:      "matching resource type and expression",
+			resources: []string{"pods"},
+			jmespath:  "metadata.labels.test == 'true'",
+			target:    labelled(podResourceType, "true"),
+			want:      true,
 		},
 		{
-			name: "non-matching resource type",
-			resource: map[string]interface{}{
-				"kind": "Service",
-				"metadata": map[string]interface{}{
-					"labels": map[string]interface{}{
-						"test": "true",
-					},
-				},
-			},
-			context: map[string]interface{}{
-				"pvc_is_not_mounted": true,
-			},
-			want: false,
+			name:      "non-matching resource type",
+			resources: []string{"pods"},
+			jmespath:  "metadata.labels.test == 'true'",
+			target:    labelled(services, "true"),
+			want:      false,
 		},
 		{
-			name: "non-matching label",
-			resource: map[string]interface{}{
-				"kind": "Pod",
-				"metadata": map[string]interface{}{
-					"labels": map[string]interface{}{
-						"test": "false",
-					},
-				},
-			},
-			context: map[string]interface{}{
-				"pvc_is_not_mounted": true,
-			},
-			want: false,
+			name:      "non-matching expression",
+			resources: []string{"pods"},
+			jmespath:  "metadata.labels.test == 'true'",
+			target:    labelled(podResourceType, "false"),
+			want:      false,
 		},
 		{
-			name: "non-matching context",
-			resource: map[string]interface{}{
-				"kind": "Pod",
-				"metadata": map[string]interface{}{
-					"labels": map[string]interface{}{
-						"test": "true",
-					},
-				},
-			},
-			context: map[string]interface{}{
-				"pvc_is_not_mounted": false,
-			},
-			want: true, // Changed to true since we removed the context check from JMESPath
+			name:      "star matches any resource type",
+			resources: []string{"*"},
+			jmespath:  "metadata.labels.test == 'true'",
+			target:    labelled(services, "true"),
+			want:      true,
+		},
+		{
+			// The plural comes from the listed Resource type, so a rule naming an
+			// irregular plural applies. Guessing it from the kind produced
+			// "ingresss", and such a rule never fired.
+			name:      "irregular plural",
+			resources: []string{"ingresses"},
+			jmespath:  "metadata.labels.test == 'true'",
+			target:    labelled(ingresses, "true"),
+			want:      true,
+		},
+		{
+			name:      "resource context is available to the expression",
+			resources: []string{"*"},
+			jmespath:  "_context.pvc_is_not_mounted",
+			target:    labelled(podResourceType, "true"),
+			context:   map[string]interface{}{"pvc_is_not_mounted": true},
+			want:      true,
+		},
+		{
+			name:      "resource context that does not hold",
+			resources: []string{"*"},
+			jmespath:  "_context.pvc_is_not_mounted",
+			target:    labelled(podResourceType, "true"),
+			context:   map[string]interface{}{"pvc_is_not_mounted": false},
+			want:      false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a custom Matches function for testing
-			matches := func(resource map[string]interface{}, context map[string]interface{}) bool {
-				// First check if resource type matches
-				kind, ok := resource["kind"].(string)
-				if !ok {
-					return false
-				}
-
-				resourceType := strings.ToLower(kind) + "s"
-
-				resourceMatches := false
-				for _, allowedResource := range rule.Resources {
-					if allowedResource == resourceType {
-						resourceMatches = true
-						break
-					}
-				}
-
-				if !resourceMatches {
-					return false
-				}
-
-				// Then evaluate JMESPath expression
-				if rule.compiledExpr != nil {
-					result, err := rule.compiledExpr.Search(resource)
-					if err != nil {
-						return false
-					}
-
-					if boolResult, ok := result.(bool); ok && boolResult {
-						return true
-					}
-				}
-
-				return false
+			rule := Rule{ID: "test-rule", Resources: tt.resources, JMESPath: tt.jmespath, TTL: "7d"}
+			if err := rule.ValidateAndCompile(); err != nil {
+				t.Fatalf("ValidateAndCompile() error = %v", err)
 			}
 
-			got := matches(tt.resource, tt.context)
-			if got != tt.want {
-				t.Errorf("Rule.Matches() = %v, want %v", got, tt.want)
+			if got := rule.Matches(tt.target, tt.context); got != tt.want {
+				t.Errorf("Matches() = %v, want %v", got, tt.want)
 			}
 		})
 	}
