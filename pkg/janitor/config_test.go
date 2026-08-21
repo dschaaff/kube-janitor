@@ -282,7 +282,7 @@ func TestNamespaceCleanupWithTTL(t *testing.T) {
 						},
 					},
 				}
-				matches := j.matchesResourceFilter(mustTarget(t, nsUnstructured))
+				matches := j.matchesResourceFilter(mustTarget(t, nsUnstructured, namespaceResourceType))
 
 				expectedProcessed := false
 				for _, expected := range tt.expectProcessed {
@@ -335,7 +335,7 @@ func TestNamespaceClusterResourcesBug(t *testing.T) {
 	j := New(config, Cluster{Typed: clientset})
 
 	// Test using the real namespace object (as cleanupNamespaces does)
-	matches := j.matchesResourceFilter(mustTarget(t, testNamespace))
+	matches := j.matchesResourceFilter(mustTarget(t, testNamespace, namespaceResourceType))
 
 	// According to the documentation, namespaces should be processed by default
 	// without needing --include-cluster-resources flag
@@ -345,7 +345,7 @@ func TestNamespaceClusterResourcesBug(t *testing.T) {
 
 	// Now test with include-cluster-resources = true (should definitely work)
 	config.IncludeClusterResources = true
-	matches = j.matchesResourceFilter(mustTarget(t, testNamespace))
+	matches = j.matchesResourceFilter(mustTarget(t, testNamespace, namespaceResourceType))
 	if !matches {
 		t.Errorf("Namespace should definitely be processed with --include-cluster-resources flag, but matchesResourceFilter returned false")
 	}

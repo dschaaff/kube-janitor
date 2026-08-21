@@ -8,8 +8,18 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
 )
+
+// namespaceResourceType is the Resource type namespaces are listed and deleted
+// through. Namespaces come from the typed client, which carries no discovery
+// record of its own, and these values are fixed by the Kubernetes API.
+var namespaceResourceType = ResourceType{
+	Version:    "v1",
+	Kind:       "Namespace",
+	Plural:     "namespaces",
+	Namespaced: false,
+}
 
 // Janitor handles the cleanup of Kubernetes resources
 type Janitor struct {
@@ -93,8 +103,8 @@ func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType Resource
 	if resourceType.Namespaced {
 		j.debugLog("Processing namespaced resources for type: %s", resourceType.Kind)
 
-		// Collect all resources from all namespaces first
-		var allResources []metav1.Object
+		// Collect all targets from all namespaces first
+		var allTargets []Target
 
 		for _, ns := range namespaces.Items {
 			// Skip excluded namespaces
@@ -104,30 +114,28 @@ func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType Resource
 			}
 
 			j.debugLog("Listing resources of type %s in namespace %s", resourceType.Kind, ns.Name)
-			resources, err := j.listNamespacedResources(ctx, resourceType, ns.Name)
+			targets, err := j.listTargets(ctx, resourceType, ns.Name)
 			if err != nil {
 				log.Printf("Error listing %s in namespace %s: %v", resourceType.Kind, ns.Name, err)
 				continue
 			}
-			j.debugLog("Found %d resources of type %s in namespace %s", len(resources), resourceType.Kind, ns.Name)
+			j.debugLog("Found %d resources of type %s in namespace %s", len(targets), resourceType.Kind, ns.Name)
 
-			allResources = append(allResources, resources...)
+			allTargets = append(allTargets, targets...)
 		}
 
-		// Process resources serially
-		j.processResourcesSerially(ctx, allResources, counter)
+		j.processTargets(ctx, allTargets, counter)
 
 	} else if j.config.IncludeClusterResources {
 		// Process cluster-scoped resources if enabled
 		j.debugLog("Processing cluster-scoped resources for type: %s", resourceType.Kind)
-		resources, err := j.listClusterResources(ctx, resourceType)
+		targets, err := j.listTargets(ctx, resourceType, "")
 		if err != nil {
 			return fmt.Errorf("failed to list cluster-scoped %s: %v", resourceType.Kind, err)
 		}
-		j.debugLog("Found %d cluster-scoped resources of type %s", len(resources), resourceType.Kind)
+		j.debugLog("Found %d cluster-scoped resources of type %s", len(targets), resourceType.Kind)
 
-		// Process resources serially
-		j.processResourcesSerially(ctx, resources, counter)
+		j.processTargets(ctx, targets, counter)
 	}
 
 	return nil
@@ -177,52 +185,35 @@ func (j *Janitor) shouldProcessNamespace(namespace string) bool {
 	return false
 }
 
-func (j *Janitor) listNamespacedResources(ctx context.Context, resourceType ResourceType, namespace string) ([]metav1.Object, error) {
-	gvr := schema.GroupVersionResource{
-		Group:    resourceType.Group,
-		Version:  resourceType.Version,
-		Resource: resourceType.Plural,
+// listTargets lists every resource of the given type as a Target carrying that
+// type, in one namespace or across the cluster when namespace is empty.
+func (j *Janitor) listTargets(ctx context.Context, resourceType ResourceType, namespace string) ([]Target, error) {
+	resource := j.cluster.Dynamic.Resource(resourceType.gvr())
+
+	var lister dynamic.ResourceInterface = resource
+	scope := "cluster-scoped"
+	if namespace != "" {
+		lister = resource.Namespace(namespace)
+		scope = "namespace " + namespace
 	}
 
-	list, err := j.cluster.Dynamic.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+	list, err := lister.List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list %s in namespace %s: %v", resourceType.Kind, namespace, err)
+		return nil, fmt.Errorf("failed to list %s in %s: %v", resourceType.Kind, scope, err)
 	}
 
-	var resources []metav1.Object
-	for _, item := range list.Items {
-		// Convert unstructured.Unstructured to metav1.Object
-		obj := item.DeepCopy()
-		obj.SetKind(resourceType.Kind)
-		obj.SetAPIVersion(fmt.Sprintf("%s/%s", resourceType.Group, resourceType.Version))
-		resources = append(resources, obj)
+	targets := make([]Target, 0, len(list.Items))
+	for i := range list.Items {
+		t, err := newTarget(&list.Items[i], resourceType)
+		if err != nil {
+			log.Printf("Error reading %s %s/%s: %v", resourceType.Kind,
+				list.Items[i].GetNamespace(), list.Items[i].GetName(), err)
+			continue
+		}
+		targets = append(targets, t)
 	}
 
-	return resources, nil
-}
-
-func (j *Janitor) listClusterResources(ctx context.Context, resourceType ResourceType) ([]metav1.Object, error) {
-	gvr := schema.GroupVersionResource{
-		Group:    resourceType.Group,
-		Version:  resourceType.Version,
-		Resource: resourceType.Plural,
-	}
-
-	list, err := j.cluster.Dynamic.Resource(gvr).List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("failed to list cluster-scoped %s: %v", resourceType.Kind, err)
-	}
-
-	var resources []metav1.Object
-	for _, item := range list.Items {
-		// Convert unstructured.Unstructured to metav1.Object
-		obj := item.DeepCopy()
-		obj.SetKind(resourceType.Kind)
-		obj.SetAPIVersion(fmt.Sprintf("%s/%s", resourceType.Group, resourceType.Version))
-		resources = append(resources, obj)
-	}
-
-	return resources, nil
+	return targets, nil
 }
 
 func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[string]int) error {
@@ -288,41 +279,38 @@ func (j *Janitor) cleanupNamespaces(ctx context.Context, counter map[string]int)
 
 	// handleResource applies the same filter to every target, so there is no
 	// second pass here.
-	candidates := make([]metav1.Object, 0, len(namespaces.Items))
+	candidates := make([]Target, 0, len(namespaces.Items))
 	for i := range namespaces.Items {
-		candidates = append(candidates, &namespaces.Items[i])
+		t, err := newTarget(&namespaces.Items[i], namespaceResourceType)
+		if err != nil {
+			log.Printf("Error reading namespace %s: %v", namespaces.Items[i].Name, err)
+			continue
+		}
+		candidates = append(candidates, t)
 	}
 
-	// Process namespaces serially
-	j.processResourcesSerially(ctx, candidates, counter)
+	j.processTargets(ctx, candidates, counter)
 
 	return nil
 }
 
-// processResourcesSerially processes resources one by one in serial order
-func (j *Janitor) processResourcesSerially(ctx context.Context, resources []metav1.Object, counter map[string]int) {
-	if len(resources) == 0 {
+// processTargets processes targets one by one in serial order
+func (j *Janitor) processTargets(ctx context.Context, targets []Target, counter map[string]int) {
+	if len(targets) == 0 {
 		return
 	}
 
-	j.debugLog("Processing %d resources serially", len(resources))
+	j.debugLog("Processing %d resources serially", len(targets))
 
 	alreadySeen := make(map[string]bool)
 
-	for _, resource := range resources {
+	for _, t := range targets {
 		// Check for context cancellation before processing each resource
 		select {
 		case <-ctx.Done():
 			j.debugLog("Context cancelled, stopping resource processing")
 			return
 		default:
-		}
-
-		t, err := newTarget(resource)
-		if err != nil {
-			log.Printf("Error reading resource %s/%s: %v",
-				resource.GetNamespace(), resource.GetName(), err)
-			continue
 		}
 
 		key := t.describe()

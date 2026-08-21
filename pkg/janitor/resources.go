@@ -2,17 +2,38 @@ package janitor
 
 import (
 	"fmt"
-	"k8s.io/client-go/kubernetes"
 	"strings"
+
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/kubernetes"
 )
 
-// ResourceType represents a Kubernetes API resource type
+// ResourceType is a kind as the cluster's discovery reports it, carrying the
+// plural a Target is listed and deleted through.
 type ResourceType struct {
 	Group      string
 	Version    string
 	Kind       string
 	Plural     string
 	Namespaced bool
+}
+
+// apiVersion renders the group and version the way a Kubernetes object reports
+// it: "v1" for the core group, "group/version" for every other.
+func (rt ResourceType) apiVersion() string {
+	if rt.Group == "" {
+		return rt.Version
+	}
+	return rt.Group + "/" + rt.Version
+}
+
+// gvr is the resource a target of this type is listed and deleted through.
+func (rt ResourceType) gvr() schema.GroupVersionResource {
+	return schema.GroupVersionResource{
+		Group:    rt.Group,
+		Version:  rt.Version,
+		Resource: rt.Plural,
+	}
 }
 
 // GetResourceTypes returns all available resource types in the cluster

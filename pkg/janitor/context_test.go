@@ -11,6 +11,11 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+// pvcResourceType is the Resource type persistent volume claims are listed as.
+var pvcResourceType = ResourceType{
+	Version: "v1", Kind: "PersistentVolumeClaim", Plural: "persistentvolumeclaims", Namespaced: true,
+}
+
 func TestGetPVCContext(t *testing.T) {
 	tests := []struct {
 		name              string
@@ -127,7 +132,7 @@ func TestGetPVCContext(t *testing.T) {
 
 			// Get PVC context
 			ctx := context.Background()
-			got, err := j.getPVCContext(ctx, mustTarget(t, tt.pvc))
+			got, err := j.getPVCContext(ctx, mustTarget(t, tt.pvc, pvcResourceType))
 			if err != nil {
 				t.Fatalf("getPVCContext() error = %v", err)
 			}
@@ -179,7 +184,7 @@ func TestGetResourceContext(t *testing.T) {
 				tt.setup(t, j)
 			}
 
-			got, err := j.getResourceContext(context.Background(), mustTarget(t, tt.resource))
+			got, err := j.getResourceContext(context.Background(), mustTarget(t, tt.resource, podResourceType))
 			if err != nil {
 				t.Fatalf("getResourceContext() error = %v", err)
 			}
