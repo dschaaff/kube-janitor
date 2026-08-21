@@ -49,18 +49,13 @@ func (r *Rule) ValidateAndCompile() error {
 	return nil
 }
 
-// Matches checks if the rule matches the given resource and context
-func (r *Rule) Matches(resource map[string]interface{}, context map[string]interface{}) bool {
-	// Check if resource type matches
-	kind, ok := resource["kind"].(string)
-	if !ok {
-		return false
-	}
-	resourceType := fmt.Sprintf("%ss", kind)
-
+// Matches checks if the rule matches the given target and context. The
+// resources list is matched against the plural the target was listed as, so a
+// rule naming an irregular plural applies to it.
+func (r *Rule) Matches(t Target, context map[string]interface{}) bool {
 	matches := false
 	for _, allowedResource := range r.Resources {
-		if allowedResource == "*" || allowedResource == resourceType {
+		if allowedResource == "*" || allowedResource == t.GVR.Resource {
 			matches = true
 			break
 		}
@@ -70,8 +65,8 @@ func (r *Rule) Matches(resource map[string]interface{}, context map[string]inter
 	}
 
 	// Add context to resource for JMESPath evaluation
-	data := make(map[string]interface{})
-	for k, v := range resource {
+	data := make(map[string]interface{}, len(t.Raw)+1)
+	for k, v := range t.Raw {
 		data[k] = v
 	}
 	data["_context"] = context
