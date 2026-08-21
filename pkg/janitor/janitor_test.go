@@ -43,25 +43,18 @@ func newRunFixture(t *testing.T, cfg *Config, rt ResourceType, objects ...*unstr
 	return New(cfg, Cluster{Typed: typed, Dynamic: dynamicClientFor(rt, listed...)})
 }
 
-// discoveryFor reports the given type, alongside the core group a run always
-// asks for first.
+// discoveryFor reports the given type. Discovery returns the first list matching
+// a group version, so the trailing core-group entry only answers the "v1" lookup
+// GetResourceTypes always makes first, and is shadowed for a core-group type.
 func discoveryFor(rt ResourceType) []*metav1.APIResourceList {
-	entry := metav1.APIResource{
-		Name:       rt.Plural,
-		Kind:       rt.Kind,
-		Namespaced: rt.Namespaced,
-		Verbs:      []string{"list", "delete"},
-	}
-
-	if rt.Group == "" {
-		return []*metav1.APIResourceList{
-			{GroupVersion: "v1", APIResources: []metav1.APIResource{entry}},
-		}
-	}
-
 	return []*metav1.APIResourceList{
+		{GroupVersion: rt.apiVersion(), APIResources: []metav1.APIResource{{
+			Name:       rt.Plural,
+			Kind:       rt.Kind,
+			Namespaced: rt.Namespaced,
+			Verbs:      []string{"list", "delete"},
+		}}},
 		{GroupVersion: "v1"},
-		{GroupVersion: rt.apiVersion(), APIResources: []metav1.APIResource{entry}},
 	}
 }
 
@@ -196,21 +189,16 @@ func TestCleanUp(t *testing.T) {
 // produced "ingresss", which the include list rejected and the API server would
 // not have recognised.
 func TestCleanUpDeletesAnIrregularlyPluralisedResource(t *testing.T) {
-	ingresses := ResourceType{
-		Group: "networking.k8s.io", Version: "v1",
-		Kind: "Ingress", Plural: "ingresses", Namespaced: true,
-	}
-
 	cfg := NewConfig()
 	cfg.IncludeResources = []string{"ingresses"}
 
-	j := newRunFixture(t, cfg, ingresses, expiredObject(ingresses, "staging", "web"))
+	j := newRunFixture(t, cfg, ingressResourceType, expiredObject(ingressResourceType, "staging", "web"))
 
 	if err := j.CleanUp(context.Background()); err != nil {
 		t.Fatalf("CleanUp() error = %v", err)
 	}
 
-	if resourceExists(t, j, ingresses, "staging", "web") {
+	if resourceExists(t, j, ingressResourceType, "staging", "web") {
 		t.Error("ingress staging/web still exists, want it deleted")
 	}
 }

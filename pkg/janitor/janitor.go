@@ -8,18 +8,13 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/dynamic"
 )
 
 // namespaceResourceType is the Resource type namespaces are listed and deleted
-// through. Namespaces come from the typed client, which carries no discovery
-// record of its own, and these values are fixed by the Kubernetes API.
-var namespaceResourceType = ResourceType{
-	Version:    "v1",
-	Kind:       "Namespace",
-	Plural:     "namespaces",
-	Namespaced: false,
-}
+// through. cleanupNamespaces lists them through the typed client rather than
+// from the discovered types, so it names the type here; the values are fixed by
+// the Kubernetes API.
+var namespaceResourceType = ResourceType{Version: "v1", Kind: "Namespace", Plural: "namespaces"}
 
 // Janitor handles the cleanup of Kubernetes resources
 type Janitor struct {
@@ -188,18 +183,11 @@ func (j *Janitor) shouldProcessNamespace(namespace string) bool {
 // listTargets lists every resource of the given type as a Target carrying that
 // type, in one namespace or across the cluster when namespace is empty.
 func (j *Janitor) listTargets(ctx context.Context, resourceType ResourceType, namespace string) ([]Target, error) {
-	resource := j.cluster.Dynamic.Resource(resourceType.gvr())
-
-	var lister dynamic.ResourceInterface = resource
-	scope := "cluster-scoped"
-	if namespace != "" {
-		lister = resource.Namespace(namespace)
-		scope = "namespace " + namespace
-	}
-
-	list, err := lister.List(ctx, metav1.ListOptions{})
+	// An empty namespace lists across the cluster.
+	list, err := j.cluster.Dynamic.Resource(resourceType.gvr()).Namespace(namespace).
+		List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return nil, fmt.Errorf("failed to list %s in %s: %v", resourceType.Kind, scope, err)
+		return nil, err
 	}
 
 	targets := make([]Target, 0, len(list.Items))
