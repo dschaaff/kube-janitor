@@ -42,6 +42,12 @@ looked up in the cluster, such as whether a volume claim is mounted. Rules may
 test it.
 _Avoid_: Metadata, enrichment, extra data
 
+**Cluster**:
+The connections one run works through: the typed client for the built-in kinds
+Resource context and events need, and the dynamic client for the arbitrary kinds
+a run lists and deletes. Both are resolved from one set of credentials.
+_Avoid_: Client, clientset, connection pool
+
 **Notification**:
 A warning that a Target is about to be deleted, sent ahead of its Deadline.
 _Avoid_: Alert, message, event (a Notification may be recorded as a Kubernetes
@@ -63,3 +69,9 @@ _Avoid_: Execute, enact, perform, handle
 The module that decides which resources a run considers at all, from the
 configured resource and namespace include and exclude lists.
 _Avoid_: Filter, matcher, scope
+
+**Connect**:
+The module that resolves the ambient credentials and returns the Cluster they
+grant. A run is handed a Cluster and never builds one, so the whole of a run can
+be exercised against fakes.
+_Avoid_: Client factory, bootstrap, initialise

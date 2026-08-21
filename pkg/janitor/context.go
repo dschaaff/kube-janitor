@@ -47,7 +47,7 @@ func (j *Janitor) getPVCContext(ctx context.Context, t Target) (*ResourceContext
 	isReferenced := false
 
 	// Check if PVC is mounted by any pods
-	pods, err := j.client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	pods, err := j.cluster.Typed.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pods: %v", err)
 	}
@@ -66,7 +66,7 @@ func (j *Janitor) getPVCContext(ctx context.Context, t Target) (*ResourceContext
 	}
 
 	// Check if PVC is referenced by StatefulSets
-	statefulsets, err := j.client.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
+	statefulsets, err := j.cluster.Typed.AppsV1().StatefulSets(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list statefulsets: %v", err)
 	}
@@ -128,7 +128,7 @@ func (j *Janitor) getPVCContext(ctx context.Context, t Target) (*ResourceContext
 }
 
 func (j *Janitor) isPVCReferencedByDeployments(ctx context.Context, namespace, pvcName string) (bool, error) {
-	deployments, err := j.client.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
+	deployments, err := j.cluster.Typed.AppsV1().Deployments(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return false, err
 	}
@@ -145,7 +145,7 @@ func (j *Janitor) isPVCReferencedByDeployments(ctx context.Context, namespace, p
 }
 
 func (j *Janitor) isPVCReferencedByJobs(ctx context.Context, namespace, pvcName string) (bool, error) {
-	jobs, err := j.client.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
+	jobs, err := j.cluster.Typed.BatchV1().Jobs(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return false, err
 	}
@@ -162,7 +162,7 @@ func (j *Janitor) isPVCReferencedByJobs(ctx context.Context, namespace, pvcName 
 }
 
 func (j *Janitor) isPVCReferencedByCronJobs(ctx context.Context, namespace, pvcName string) (bool, error) {
-	cronJobs, err := j.client.BatchV1().CronJobs(namespace).List(ctx, metav1.ListOptions{})
+	cronJobs, err := j.cluster.Typed.BatchV1().CronJobs(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return false, err
 	}

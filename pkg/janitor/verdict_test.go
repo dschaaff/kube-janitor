@@ -12,13 +12,12 @@ import (
 // now is the fixed clock every case in this file is judged against.
 var now = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
-// podObject builds the pod every test in this package uses: staging/web, created
-// at the given age, with the given annotations.
-func podObject(age time.Duration, annotations map[string]string) *unstructured.Unstructured {
+// podObject builds a pod created at the given age, with the given annotations.
+func podObject(namespace, name string, age time.Duration, annotations map[string]string) *unstructured.Unstructured {
 	metadata := map[string]interface{}{
-		"name":              "web",
-		"namespace":         "staging",
-		"uid":               "pod-uid",
+		"name":              name,
+		"namespace":         namespace,
+		"uid":               namespace + "/" + name,
 		"creationTimestamp": now.Add(-age).Format(time.RFC3339),
 	}
 	if annotations != nil {
@@ -36,7 +35,7 @@ func podObject(age time.Duration, annotations map[string]string) *unstructured.U
 func pod(t *testing.T, age time.Duration, annotations map[string]string) Target {
 	t.Helper()
 
-	return mustTarget(t, podObject(age, annotations))
+	return mustTarget(t, podObject("staging", "web", age, annotations))
 }
 
 func toStringMap(in map[string]string) map[string]interface{} {

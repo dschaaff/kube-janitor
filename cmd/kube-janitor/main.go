@@ -72,10 +72,12 @@ func main() {
 		log.Fatalf("Failed to load rules: %v", err)
 	}
 
-	j, err := janitor.New(config)
+	cluster, err := janitor.Connect()
 	if err != nil {
-		log.Fatalf("Failed to create janitor: %v", err)
+		log.Fatalf("Failed to connect to cluster: %v", err)
 	}
+
+	j := janitor.New(config, cluster)
 
 	// Set up context with cancellation and signal handling
 	ctx, gs := shutdown.ShutdownWithContext()

@@ -102,7 +102,7 @@ func (j *Janitor) createEvent(ctx context.Context, t Target, message, reason str
 		},
 	}
 
-	if _, err := j.client.CoreV1().Events(eventNamespace).Create(ctx, event, metav1.CreateOptions{}); err != nil {
+	if _, err := j.cluster.Typed.CoreV1().Events(eventNamespace).Create(ctx, event, metav1.CreateOptions{}); err != nil {
 		return fmt.Errorf("failed to create event: %v", err)
 	}
 
@@ -122,10 +122,10 @@ func (j *Janitor) deleteResource(ctx context.Context, t Target) error {
 	var err error
 	if t.Namespace != "" {
 		j.infoLog("Deleting namespaced resource %s/%s", t.Namespace, t.Name)
-		err = j.dynamicClient.Resource(t.GVR).Namespace(t.Namespace).Delete(ctx, t.Name, deleteOptions)
+		err = j.cluster.Dynamic.Resource(t.GVR).Namespace(t.Namespace).Delete(ctx, t.Name, deleteOptions)
 	} else {
 		j.infoLog("Deleting cluster-scoped resource %s", t.Name)
-		err = j.dynamicClient.Resource(t.GVR).Delete(ctx, t.Name, deleteOptions)
+		err = j.cluster.Dynamic.Resource(t.GVR).Delete(ctx, t.Name, deleteOptions)
 	}
 	if err != nil {
 		return fmt.Errorf("failed to delete resource: %v", err)
