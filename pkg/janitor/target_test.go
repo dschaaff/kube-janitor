@@ -10,11 +10,14 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
+// podResourceType is the Resource type most fixtures are listed as.
+var podResourceType = ResourceType{Version: "v1", Kind: "Pod", Plural: "pods", Namespaced: true}
+
 // mustTarget builds a Target for tests that drive the functions behind it.
-func mustTarget(t *testing.T, obj metav1.Object) Target {
+func mustTarget(t *testing.T, obj metav1.Object, rt ResourceType) Target {
 	t.Helper()
 
-	target, err := newTarget(obj)
+	target, err := newTarget(obj, rt)
 	if err != nil {
 		t.Fatalf("newTarget() error = %v", err)
 	}
@@ -37,7 +40,9 @@ func TestNewTargetFromUnstructured(t *testing.T) {
 		},
 	}}
 
-	got := mustTarget(t, obj)
+	got := mustTarget(t, obj, ResourceType{
+		Group: "apps", Version: "v1", Kind: "Deployment", Plural: "deployments", Namespaced: true,
+	})
 
 	if got.Kind != "Deployment" {
 		t.Errorf("Kind = %q, want %q", got.Kind, "Deployment")
@@ -72,7 +77,7 @@ func TestNewTargetFromUnstructured(t *testing.T) {
 func TestNewTargetFromNamespace(t *testing.T) {
 	got := mustTarget(t, &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{Name: "pr-42"},
-	})
+	}, namespaceResourceType)
 
 	// A namespace is its own name, and carries no namespace of its own.
 	if got.Kind != "Namespace" {
@@ -103,36 +108,32 @@ func TestNewTargetFromNamespace(t *testing.T) {
 	}
 }
 
-func TestNewTargetFromUnrecognisedType(t *testing.T) {
-	got := mustTarget(t, &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Name: "one-off", Namespace: "default"},
-	})
-
-	if got.Kind != "Unknown" {
-		t.Errorf("Kind = %q, want Unknown", got.Kind)
-	}
-	if got.Raw == nil {
-		t.Error("Raw = nil, want the resource as a map")
-	}
-}
-
-// Pins behaviour that is known to be wrong, so that carrying the listed GVR down
-// to the target has to change it deliberately rather than by accident.
-func TestNewTargetGuessesPluralsAndGetsIrregularsWrong(t *testing.T) {
-	for kind, want := range map[string]string{
-		"Deployment":    "deployments",
-		"Ingress":       "ingresss",       // should be "ingresses"
-		"NetworkPolicy": "networkpolicys", // should be "networkpolicies"
+// The listed Resource type is the only source of the plural, so irregular
+// plurals reach the Target intact. Guessing one from the kind is what this
+// replaced, and what these cases stop coming back.
+func TestNewTargetCarriesTheListedResourceType(t *testing.T) {
+	for _, rt := range []ResourceType{
+		{Group: "apps", Version: "v1", Kind: "Deployment", Plural: "deployments", Namespaced: true},
+		{Group: "networking.k8s.io", Version: "v1", Kind: "Ingress", Plural: "ingresses", Namespaced: true},
+		{Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy", Plural: "networkpolicies", Namespaced: true},
 	} {
-		obj := &unstructured.Unstructured{Object: map[string]interface{}{
-			"kind":       kind,
-			"apiVersion": "v1",
-			"metadata":   map[string]interface{}{"name": "x", "namespace": "default"},
-		}}
+		t.Run(rt.Kind, func(t *testing.T) {
+			obj := &unstructured.Unstructured{Object: map[string]interface{}{
+				"metadata": map[string]interface{}{"name": "x", "namespace": "default"},
+			}}
 
-		if got := mustTarget(t, obj).GVR.Resource; got != want {
-			t.Errorf("kind %s: GVR.Resource = %q, want %q", kind, got, want)
-		}
+			got := mustTarget(t, obj, rt)
+
+			if got.GVR != rt.gvr() {
+				t.Errorf("GVR = %v, want %v", got.GVR, rt.gvr())
+			}
+			if got.Kind != rt.Kind {
+				t.Errorf("Kind = %q, want %q", got.Kind, rt.Kind)
+			}
+			if got.APIVersion != rt.apiVersion() {
+				t.Errorf("APIVersion = %q, want %q", got.APIVersion, rt.apiVersion())
+			}
+		})
 	}
 }
 
@@ -151,7 +152,7 @@ func TestTargetWasNotified(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			target := mustTarget(t, &corev1.Namespace{
 				ObjectMeta: metav1.ObjectMeta{Name: "ns", Annotations: tt.annotations},
-			})
+			}, namespaceResourceType)
 
 			if got := target.wasNotified(); got != tt.want {
 				t.Errorf("wasNotified() = %v, want %v", got, tt.want)
@@ -161,7 +162,7 @@ func TestTargetWasNotified(t *testing.T) {
 }
 
 func TestTargetDescribe(t *testing.T) {
-	target := mustTarget(t, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "pr-42"}})
+	target := mustTarget(t, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "pr-42"}}, namespaceResourceType)
 
 	if got, want := target.describe(), "Namespace /pr-42"; got != want {
 		t.Errorf("describe() = %q, want %q", got, want)

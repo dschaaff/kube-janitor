@@ -35,7 +35,7 @@ func podObject(namespace, name string, age time.Duration, annotations map[string
 func pod(t *testing.T, age time.Duration, annotations map[string]string) Target {
 	t.Helper()
 
-	return mustTarget(t, podObject("staging", "web", age, annotations))
+	return mustTarget(t, podObject("staging", "web", age, annotations), podResourceType)
 }
 
 func toStringMap(in map[string]string) map[string]interface{} {
@@ -285,7 +285,7 @@ func TestDecideAppliesRulesToUnannotatedResources(t *testing.T) {
 			"namespace":         "staging",
 			"creationTimestamp": now.Add(-2 * time.Hour).Format(time.RFC3339),
 		},
-	}})
+	}}, ResourceType{Group: "apps", Version: "v1", Kind: "Deployment", Plural: "deployments", Namespaced: true})
 
 	if target.Annotations != nil {
 		t.Fatalf("Annotations = %v, want nil for this case to be meaningful", target.Annotations)
@@ -315,7 +315,7 @@ func TestDecideNeverMatchesRulesAgainstNamespaces(t *testing.T) {
 			Name:              "pr-42",
 			CreationTimestamp: metav1.Time{Time: now.Add(-2 * time.Hour)},
 		},
-	})
+	}, namespaceResourceType)
 
 	cfg := &Config{Rules: mustRules(t, Rule{
 		ID: "temporary-pr-namespaces", Resources: []string{"*"},

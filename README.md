@@ -142,7 +142,9 @@ does not take effect for dry runs.
 : Include resources for clean up (default: all resources), can also be
 configured via environment variable `INCLUDE_RESOURCES`. This option
 can be used if you want to clean up only certain resource types,
-e.g. only `deployments`.
+e.g. only `deployments`. Names are the plural your cluster's API
+reports for the resource, as listed by `kubectl api-resources`, so
+irregular plurals are `ingresses` and `networkpolicies`.
 
 `--exclude-resources`
 
@@ -284,8 +286,10 @@ output/statistics.
 `resources`
 
 : List of resources (e.g. `deployments`, `namespaces`, ..) this rule
-should be applied to. The special value `*` will match all resource
-types.
+should be applied to. Names are the plural your cluster's API reports
+for the resource, as listed by `kubectl api-resources`, so irregular
+plurals are `ingresses` and `networkpolicies`. The special value `*`
+will match all resource types.
 
 `jmespath`
 

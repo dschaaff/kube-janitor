@@ -10,13 +10,8 @@ import (
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
 )
-
-var podGVR = schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 
 // effectsFixture is a janitor wired to fake clients, holding one pod.
 type effectsFixture struct {
@@ -32,28 +27,10 @@ func newEffectsFixture(t *testing.T, cfg *Config) effectsFixture {
 	return effectsFixture{
 		janitor: New(cfg, Cluster{
 			Typed:   fake.NewSimpleClientset(),
-			Dynamic: podDynamicClient(obj),
+			Dynamic: dynamicClientFor(podResourceType, obj),
 		}),
-		target: mustTarget(t, obj),
+		target: mustTarget(t, obj, podResourceType),
 	}
-}
-
-// podDynamicClient is a dynamic fake that knows how to list pods.
-func podDynamicClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
-	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
-		runtime.NewScheme(),
-		map[schema.GroupVersionResource]string{podGVR: "PodList"},
-		objects...,
-	)
-}
-
-// podExists reports whether the janitor's cluster still holds the named pod.
-func podExists(t *testing.T, j *Janitor, namespace, name string) bool {
-	t.Helper()
-
-	_, err := j.cluster.Dynamic.Resource(podGVR).Namespace(namespace).
-		Get(context.Background(), name, metav1.GetOptions{})
-	return err == nil
 }
 
 func (f effectsFixture) events(t *testing.T) []string {
@@ -89,7 +66,7 @@ func TestApplyDelete(t *testing.T) {
 	if got := f.events(t); len(got) != 1 || got[0] != "TTLExpired" {
 		t.Errorf("event reasons = %v, want [TTLExpired]", got)
 	}
-	if podExists(t, f.janitor, f.target.Namespace, f.target.Name) {
+	if resourceExists(t, f.janitor, podResourceType, f.target.Namespace, f.target.Name) {
 		t.Error("pod still exists, want it deleted")
 	}
 }
@@ -104,7 +81,7 @@ func TestApplyNone(t *testing.T) {
 	if got := f.events(t); len(got) != 0 {
 		t.Errorf("event reasons = %v, want none", got)
 	}
-	if !podExists(t, f.janitor, f.target.Namespace, f.target.Name) {
+	if !resourceExists(t, f.janitor, podResourceType, f.target.Namespace, f.target.Name) {
 		t.Error("pod was deleted, want it left alone")
 	}
 }
@@ -125,7 +102,7 @@ func TestApplyDryRunWritesNothing(t *testing.T) {
 	if got := f.events(t); len(got) != 0 {
 		t.Errorf("event reasons = %v, want none in dry run", got)
 	}
-	if !podExists(t, f.janitor, f.target.Namespace, f.target.Name) {
+	if !resourceExists(t, f.janitor, podResourceType, f.target.Namespace, f.target.Name) {
 		t.Error("pod was deleted in dry run, want it left alone")
 	}
 }
@@ -219,7 +196,7 @@ func TestApplyNotify(t *testing.T) {
 	if got := f.events(t); len(got) != 1 || got[0] != "DeleteNotification" {
 		t.Errorf("event reasons = %v, want [DeleteNotification]", got)
 	}
-	if !podExists(t, f.janitor, f.target.Namespace, f.target.Name) {
+	if !resourceExists(t, f.janitor, podResourceType, f.target.Namespace, f.target.Name) {
 		t.Error("pod was deleted on a notify verdict, want it left alone")
 	}
 

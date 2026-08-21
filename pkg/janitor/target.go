@@ -3,10 +3,8 @@ package janitor
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -31,57 +29,35 @@ type Target struct {
 	GVR schema.GroupVersionResource
 }
 
-// newTarget resolves a resource's kind, GVR and raw representation once, so that
-// nothing downstream has to assert on the concrete type again.
-func newTarget(obj metav1.Object) (Target, error) {
+// newTarget builds a target from a listed resource and the Resource type it was
+// listed as. The type is the only source of the kind, API version and GVR, so
+// nothing downstream re-derives them and no plural is ever guessed.
+func newTarget(obj metav1.Object, rt ResourceType) (Target, error) {
 	t := Target{
+		Kind:        rt.Kind,
+		APIVersion:  rt.apiVersion(),
 		Namespace:   obj.GetNamespace(),
 		Name:        obj.GetName(),
 		UID:         obj.GetUID(),
 		Annotations: obj.GetAnnotations(),
 		CreatedAt:   obj.GetCreationTimestamp().Time,
+		GVR:         rt.gvr(),
 	}
 
-	switch o := obj.(type) {
-	case *unstructured.Unstructured:
-		gvk := o.GroupVersionKind()
-		t.Kind = o.GetKind()
-		t.APIVersion = o.GetAPIVersion()
-		t.Raw = o.Object
-		t.GVR = schema.GroupVersionResource{
-			Group:    gvk.Group,
-			Version:  gvk.Version,
-			Resource: pluralize(gvk.Kind),
-		}
-	case *corev1.Namespace:
-		t.Kind = "Namespace"
-		t.APIVersion = "v1"
-		t.GVR = schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
-	default:
-		t.Kind = "Unknown"
-		t.APIVersion = "v1"
-		t.GVR = schema.GroupVersionResource{Version: "v1", Resource: pluralize("Unknown")}
+	// Everything listed through the dynamic client already carries its raw form.
+	// Namespaces arrive from the typed client and have to be converted.
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		t.Raw = u.Object
+		return t, nil
 	}
 
-	if t.Raw == nil {
-		raw, err := toMap(obj)
-		if err != nil {
-			return Target{}, err
-		}
-		t.Raw = raw
+	raw, err := toMap(obj)
+	if err != nil {
+		return Target{}, err
 	}
+	t.Raw = raw
 
 	return t, nil
-}
-
-// pluralize derives a plural resource name from a kind.
-//
-// This is wrong for irregular plurals: Ingress becomes "ingresss" and
-// NetworkPolicy becomes "networkpolicys". It reproduces what the code it replaced
-// did. The fix is to carry the GVR that listed the resource down to here instead
-// of guessing, which means building the target at list time.
-func pluralize(kind string) string {
-	return strings.ToLower(kind) + "s"
 }
 
 // toMap converts a Kubernetes object to a map for JMESPath evaluation.

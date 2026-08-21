@@ -25,6 +25,12 @@ the configured deployment-time annotation when present, and from the resource's
 creation timestamp otherwise.
 _Avoid_: Start time, age, created at
 
+**Resource type**:
+A kind as the cluster's discovery reports it, carrying the plural a Target is
+listed and deleted through. A Target is built from the type it was listed as, so
+the plural is never derived from the kind.
+_Avoid_: Kind (one field of a Resource type), GVR, plural
+
 **Verdict**:
 The conclusion about one Target: leave it alone, delete it, or warn that it will be
 deleted. A Verdict carries the reason it was reached, so nothing downstream has to
