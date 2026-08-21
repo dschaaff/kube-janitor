@@ -13,18 +13,33 @@ import (
 // The Resource types fixtures are listed as. ingressResourceType is the one the
 // irregular-plural cases turn on.
 var (
-	podResourceType        = ResourceType{Version: "v1", Kind: "Pod", Plural: "pods", Namespaced: true}
-	deploymentResourceType = ResourceType{Group: "apps", Version: "v1", Kind: "Deployment", Plural: "deployments", Namespaced: true}
-	ingressResourceType    = ResourceType{Group: "networking.k8s.io", Version: "v1", Kind: "Ingress", Plural: "ingresses", Namespaced: true}
+	podResourceType = ResourceType{
+		Version: "v1", Kind: "Pod", Plural: "pods", Namespaced: true,
+	}
+	deploymentResourceType = ResourceType{
+		Group: "apps", Version: "v1", Kind: "Deployment", Plural: "deployments", Namespaced: true,
+	}
+	ingressResourceType = ResourceType{
+		Group: "networking.k8s.io", Version: "v1", Kind: "Ingress", Plural: "ingresses", Namespaced: true,
+	}
+	networkPolicyResourceType = ResourceType{
+		Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy",
+		Plural: "networkpolicies", Namespaced: true,
+	}
 )
 
-// mustTarget builds a Target for tests that drive the functions behind it.
+// mustTarget builds a Target for tests that drive the functions behind it,
+// taking either form a resource arrives in.
 func mustTarget(t *testing.T, obj metav1.Object, rt ResourceType) Target {
 	t.Helper()
 
-	target, err := newTarget(obj, rt)
+	if u, ok := obj.(*unstructured.Unstructured); ok {
+		return newTarget(u, rt)
+	}
+
+	target, err := newTypedTarget(obj, rt)
 	if err != nil {
-		t.Fatalf("newTarget() error = %v", err)
+		t.Fatalf("newTypedTarget() error = %v", err)
 	}
 	return target
 }
@@ -113,27 +128,55 @@ func TestNewTargetFromNamespace(t *testing.T) {
 
 // The listed Resource type is the only source of the plural, so irregular
 // plurals reach the Target intact. Guessing one from the kind is what this
-// replaced, and what these cases stop coming back.
+// replaced, and what these cases stop coming back. The wanted values are spelled
+// out rather than derived from the type, so that a fault in the derivation
+// itself fails here too.
 func TestNewTargetCarriesTheListedResourceType(t *testing.T) {
-	for _, rt := range []ResourceType{
-		ingressResourceType,
-		{Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy", Plural: "networkpolicies", Namespaced: true},
-	} {
-		t.Run(rt.Kind, func(t *testing.T) {
-			obj := &unstructured.Unstructured{Object: map[string]interface{}{
+	tests := []struct {
+		rt             ResourceType
+		wantGVR        schema.GroupVersionResource
+		wantAPIVersion string
+	}{
+		{
+			rt: ingressResourceType,
+			wantGVR: schema.GroupVersionResource{
+				Group: "networking.k8s.io", Version: "v1", Resource: "ingresses",
+			},
+			wantAPIVersion: "networking.k8s.io/v1",
+		},
+		{
+			rt: networkPolicyResourceType,
+			wantGVR: schema.GroupVersionResource{
+				Group: "networking.k8s.io", Version: "v1", Resource: "networkpolicies",
+			},
+			wantAPIVersion: "networking.k8s.io/v1",
+		},
+		{
+			// A core-group type: the API version is the bare version, with no
+			// leading slash.
+			rt:             podResourceType,
+			wantGVR:        schema.GroupVersionResource{Version: "v1", Resource: "pods"},
+			wantAPIVersion: "v1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.rt.Kind, func(t *testing.T) {
+			got := newTarget(&unstructured.Unstructured{Object: map[string]interface{}{
 				"metadata": map[string]interface{}{"name": "x", "namespace": "default"},
-			}}
+			}}, tt.rt)
 
-			got := mustTarget(t, obj, rt)
-
-			if got.GVR != rt.gvr() {
-				t.Errorf("GVR = %v, want %v", got.GVR, rt.gvr())
+			if got.GVR != tt.wantGVR {
+				t.Errorf("GVR = %v, want %v", got.GVR, tt.wantGVR)
 			}
-			if got.Kind != rt.Kind {
-				t.Errorf("Kind = %q, want %q", got.Kind, rt.Kind)
+			if got.plural() != tt.wantGVR.Resource {
+				t.Errorf("plural() = %q, want %q", got.plural(), tt.wantGVR.Resource)
 			}
-			if got.APIVersion != rt.apiVersion() {
-				t.Errorf("APIVersion = %q, want %q", got.APIVersion, rt.apiVersion())
+			if got.Kind != tt.rt.Kind {
+				t.Errorf("Kind = %q, want %q", got.Kind, tt.rt.Kind)
+			}
+			if got.APIVersion != tt.wantAPIVersion {
+				t.Errorf("APIVersion = %q, want %q", got.APIVersion, tt.wantAPIVersion)
 			}
 		})
 	}
@@ -164,7 +207,8 @@ func TestTargetWasNotified(t *testing.T) {
 }
 
 func TestTargetDescribe(t *testing.T) {
-	target := mustTarget(t, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "pr-42"}}, namespaceResourceType)
+	target := mustTarget(t,
+		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "pr-42"}}, namespaceResourceType)
 
 	if got, want := target.describe(), "Namespace /pr-42"; got != want {
 		t.Errorf("describe() = %q, want %q", got, want)

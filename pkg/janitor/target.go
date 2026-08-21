@@ -29,11 +29,35 @@ type Target struct {
 	GVR schema.GroupVersionResource
 }
 
-// newTarget builds a target from a listed resource and the Resource type it was
-// listed as. The type is the only source of the kind, API version and GVR, so
-// nothing downstream re-derives them and no plural is ever guessed.
-func newTarget(obj metav1.Object, rt ResourceType) (Target, error) {
-	t := Target{
+// newTarget builds a target from a resource the dynamic client listed and the
+// Resource type it was listed as. The type is the only source of the kind, API
+// version and GVR, so nothing downstream re-derives them and no plural is ever
+// guessed. The caller must pass the type it listed the resource under; nothing
+// here can check that.
+func newTarget(u *unstructured.Unstructured, rt ResourceType) Target {
+	t := targetOf(u, rt)
+	t.Raw = u.Object
+	return t
+}
+
+// newTypedTarget builds a target from a resource the typed client returned,
+// converting it to the raw form rules evaluate against. Only namespaces take
+// this path, and only the conversion can fail.
+func newTypedTarget(obj metav1.Object, rt ResourceType) (Target, error) {
+	raw, err := toMap(obj)
+	if err != nil {
+		return Target{}, err
+	}
+
+	t := targetOf(obj, rt)
+	t.Raw = raw
+	return t, nil
+}
+
+// targetOf fills in everything that does not depend on how the resource was
+// listed.
+func targetOf(obj metav1.Object, rt ResourceType) Target {
+	return Target{
 		Kind:        rt.Kind,
 		APIVersion:  rt.apiVersion(),
 		Namespace:   obj.GetNamespace(),
@@ -43,21 +67,6 @@ func newTarget(obj metav1.Object, rt ResourceType) (Target, error) {
 		CreatedAt:   obj.GetCreationTimestamp().Time,
 		GVR:         rt.gvr(),
 	}
-
-	// Everything listed through the dynamic client already carries its raw form.
-	// Namespaces arrive from the typed client and have to be converted.
-	if u, ok := obj.(*unstructured.Unstructured); ok {
-		t.Raw = u.Object
-		return t, nil
-	}
-
-	raw, err := toMap(obj)
-	if err != nil {
-		return Target{}, err
-	}
-	t.Raw = raw
-
-	return t, nil
 }
 
 // toMap converts a Kubernetes object to a map for JMESPath evaluation.
@@ -73,6 +82,13 @@ func toMap(obj metav1.Object) (map[string]interface{}, error) {
 	}
 
 	return result, nil
+}
+
+// plural is the Resource type's plural: the name this target was listed under,
+// and the name the include and exclude lists and a rule's resources list name it
+// by.
+func (t Target) plural() string {
+	return t.GVR.Resource
 }
 
 // describe renders the target the way log messages and events refer to it.

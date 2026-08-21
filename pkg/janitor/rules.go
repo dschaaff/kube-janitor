@@ -55,7 +55,7 @@ func (r *Rule) ValidateAndCompile() error {
 func (r *Rule) Matches(t Target, context map[string]interface{}) bool {
 	matches := false
 	for _, allowedResource := range r.Resources {
-		if allowedResource == "*" || allowedResource == t.GVR.Resource {
+		if allowedResource == "*" || allowedResource == t.plural() {
 			matches = true
 			break
 		}

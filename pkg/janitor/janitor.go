@@ -111,7 +111,7 @@ func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType Resource
 			j.debugLog("Listing resources of type %s in namespace %s", resourceType.Kind, ns.Name)
 			targets, err := j.listTargets(ctx, resourceType, ns.Name)
 			if err != nil {
-				log.Printf("Error listing %s in namespace %s: %v", resourceType.Kind, ns.Name, err)
+				log.Printf("Error listing %s in namespace %s: %v", resourceType.Plural, ns.Name, err)
 				continue
 			}
 			j.debugLog("Found %d resources of type %s in namespace %s", len(targets), resourceType.Kind, ns.Name)
@@ -126,7 +126,7 @@ func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType Resource
 		j.debugLog("Processing cluster-scoped resources for type: %s", resourceType.Kind)
 		targets, err := j.listTargets(ctx, resourceType, "")
 		if err != nil {
-			return fmt.Errorf("failed to list cluster-scoped %s: %v", resourceType.Kind, err)
+			return fmt.Errorf("failed to list cluster-scoped %s: %v", resourceType.Plural, err)
 		}
 		j.debugLog("Found %d cluster-scoped resources of type %s", len(targets), resourceType.Kind)
 
@@ -183,7 +183,6 @@ func (j *Janitor) shouldProcessNamespace(namespace string) bool {
 // listTargets lists every resource of the given type as a Target carrying that
 // type, in one namespace or across the cluster when namespace is empty.
 func (j *Janitor) listTargets(ctx context.Context, resourceType ResourceType, namespace string) ([]Target, error) {
-	// An empty namespace lists across the cluster.
 	list, err := j.cluster.Dynamic.Resource(resourceType.gvr()).Namespace(namespace).
 		List(ctx, metav1.ListOptions{})
 	if err != nil {
@@ -192,13 +191,7 @@ func (j *Janitor) listTargets(ctx context.Context, resourceType ResourceType, na
 
 	targets := make([]Target, 0, len(list.Items))
 	for i := range list.Items {
-		t, err := newTarget(&list.Items[i], resourceType)
-		if err != nil {
-			log.Printf("Error reading %s %s/%s: %v", resourceType.Kind,
-				list.Items[i].GetNamespace(), list.Items[i].GetName(), err)
-			continue
-		}
-		targets = append(targets, t)
+		targets = append(targets, newTarget(&list.Items[i], resourceType))
 	}
 
 	return targets, nil
@@ -233,7 +226,7 @@ func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[stri
 	}
 
 	if verdict.Action == ActionDelete {
-		counter[t.GVR.Resource+"-deleted"]++
+		counter[t.plural()+"-deleted"]++
 	}
 
 	return nil
@@ -269,7 +262,9 @@ func (j *Janitor) cleanupNamespaces(ctx context.Context, counter map[string]int)
 	// second pass here.
 	candidates := make([]Target, 0, len(namespaces.Items))
 	for i := range namespaces.Items {
-		t, err := newTarget(&namespaces.Items[i], namespaceResourceType)
+		// A namespace that will not convert is skipped rather than failing the
+		// run, the same way an unreadable resource context is.
+		t, err := newTypedTarget(&namespaces.Items[i], namespaceResourceType)
 		if err != nil {
 			log.Printf("Error reading namespace %s: %v", namespaces.Items[i].Name, err)
 			continue
@@ -349,7 +344,7 @@ func (j *Janitor) matchesResourceFilter(t Target) bool {
 		namespace = name
 	}
 
-	resourceType := t.GVR.Resource
+	resourceType := t.plural()
 
 	// Check if resource type is explicitly excluded
 	for _, excluded := range j.config.ExcludeResources {

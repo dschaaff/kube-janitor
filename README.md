@@ -144,7 +144,10 @@ configured via environment variable `INCLUDE_RESOURCES`. This option
 can be used if you want to clean up only certain resource types,
 e.g. only `deployments`. Names are the plural your cluster's API
 reports for the resource, as listed by `kubectl api-resources`, so
-irregular plurals are `ingresses` and `networkpolicies`.
+irregular plurals are `ingresses` and `networkpolicies`. Earlier
+versions derived these names by appending an "s" to the kind, so a
+configuration written against that (`ingresss`, `networkpolicys`) no
+longer matches anything and must be corrected.
 
 `--exclude-resources`
 
