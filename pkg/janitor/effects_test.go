@@ -33,6 +33,13 @@ func newEffectsFixture(t *testing.T, cfg *Config) effectsFixture {
 	}
 }
 
+// exists reports whether the fixture's pod is still in the cluster.
+func (f effectsFixture) exists(t *testing.T) bool {
+	t.Helper()
+
+	return resourceExists(t, f.janitor, podResourceType, f.target.Namespace, f.target.Name)
+}
+
 func (f effectsFixture) events(t *testing.T) []string {
 	t.Helper()
 
@@ -66,7 +73,7 @@ func TestApplyDelete(t *testing.T) {
 	if got := f.events(t); len(got) != 1 || got[0] != "TTLExpired" {
 		t.Errorf("event reasons = %v, want [TTLExpired]", got)
 	}
-	if resourceExists(t, f.janitor, podResourceType, f.target.Namespace, f.target.Name) {
+	if f.exists(t) {
 		t.Error("pod still exists, want it deleted")
 	}
 }
@@ -81,7 +88,7 @@ func TestApplyNone(t *testing.T) {
 	if got := f.events(t); len(got) != 0 {
 		t.Errorf("event reasons = %v, want none", got)
 	}
-	if !resourceExists(t, f.janitor, podResourceType, f.target.Namespace, f.target.Name) {
+	if !f.exists(t) {
 		t.Error("pod was deleted, want it left alone")
 	}
 }
@@ -102,7 +109,7 @@ func TestApplyDryRunWritesNothing(t *testing.T) {
 	if got := f.events(t); len(got) != 0 {
 		t.Errorf("event reasons = %v, want none in dry run", got)
 	}
-	if !resourceExists(t, f.janitor, podResourceType, f.target.Namespace, f.target.Name) {
+	if !f.exists(t) {
 		t.Error("pod was deleted in dry run, want it left alone")
 	}
 }
@@ -196,7 +203,7 @@ func TestApplyNotify(t *testing.T) {
 	if got := f.events(t); len(got) != 1 || got[0] != "DeleteNotification" {
 		t.Errorf("event reasons = %v, want [DeleteNotification]", got)
 	}
-	if !resourceExists(t, f.janitor, podResourceType, f.target.Namespace, f.target.Name) {
+	if !f.exists(t) {
 		t.Error("pod was deleted on a notify verdict, want it left alone")
 	}
 

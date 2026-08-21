@@ -66,10 +66,10 @@ func TestRuleValidation(t *testing.T) {
 }
 
 func TestRuleMatches(t *testing.T) {
-	ingresses := ResourceType{
-		Group: "networking.k8s.io", Version: "v1",
-		Kind: "Ingress", Plural: "ingresses", Namespaced: true,
-	}
+	// Held constant in every case whose axis is the resources list rather than the
+	// expression.
+	const labelIsTrue = "metadata.labels.test == 'true'"
+
 	services := ResourceType{Version: "v1", Kind: "Service", Plural: "services", Namespaced: true}
 
 	labelled := func(rt ResourceType, value string) Target {
@@ -93,28 +93,28 @@ func TestRuleMatches(t *testing.T) {
 		{
 			name:      "matching resource type and expression",
 			resources: []string{"pods"},
-			jmespath:  "metadata.labels.test == 'true'",
+			jmespath:  labelIsTrue,
 			target:    labelled(podResourceType, "true"),
 			want:      true,
 		},
 		{
 			name:      "non-matching resource type",
 			resources: []string{"pods"},
-			jmespath:  "metadata.labels.test == 'true'",
+			jmespath:  labelIsTrue,
 			target:    labelled(services, "true"),
 			want:      false,
 		},
 		{
 			name:      "non-matching expression",
 			resources: []string{"pods"},
-			jmespath:  "metadata.labels.test == 'true'",
+			jmespath:  labelIsTrue,
 			target:    labelled(podResourceType, "false"),
 			want:      false,
 		},
 		{
 			name:      "star matches any resource type",
 			resources: []string{"*"},
-			jmespath:  "metadata.labels.test == 'true'",
+			jmespath:  labelIsTrue,
 			target:    labelled(services, "true"),
 			want:      true,
 		},
@@ -124,8 +124,8 @@ func TestRuleMatches(t *testing.T) {
 			// "ingresss", and such a rule never fired.
 			name:      "irregular plural",
 			resources: []string{"ingresses"},
-			jmespath:  "metadata.labels.test == 'true'",
-			target:    labelled(ingresses, "true"),
+			jmespath:  labelIsTrue,
+			target:    labelled(ingressResourceType, "true"),
 			want:      true,
 		},
 		{

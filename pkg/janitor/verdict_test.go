@@ -285,7 +285,7 @@ func TestDecideAppliesRulesToUnannotatedResources(t *testing.T) {
 			"namespace":         "staging",
 			"creationTimestamp": now.Add(-2 * time.Hour).Format(time.RFC3339),
 		},
-	}}, ResourceType{Group: "apps", Version: "v1", Kind: "Deployment", Plural: "deployments", Namespaced: true})
+	}}, deploymentResourceType)
 
 	if target.Annotations != nil {
 		t.Fatalf("Annotations = %v, want nil for this case to be meaningful", target.Annotations)

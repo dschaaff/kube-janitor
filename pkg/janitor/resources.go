@@ -18,22 +18,19 @@ type ResourceType struct {
 	Namespaced bool
 }
 
+func (rt ResourceType) groupVersion() schema.GroupVersion {
+	return schema.GroupVersion{Group: rt.Group, Version: rt.Version}
+}
+
 // apiVersion renders the group and version the way a Kubernetes object reports
 // it: "v1" for the core group, "group/version" for every other.
 func (rt ResourceType) apiVersion() string {
-	if rt.Group == "" {
-		return rt.Version
-	}
-	return rt.Group + "/" + rt.Version
+	return rt.groupVersion().String()
 }
 
 // gvr is the resource a target of this type is listed and deleted through.
 func (rt ResourceType) gvr() schema.GroupVersionResource {
-	return schema.GroupVersionResource{
-		Group:    rt.Group,
-		Version:  rt.Version,
-		Resource: rt.Plural,
-	}
+	return rt.groupVersion().WithResource(rt.Plural)
 }
 
 // GetResourceTypes returns all available resource types in the cluster

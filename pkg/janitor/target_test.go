@@ -10,8 +10,13 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
-// podResourceType is the Resource type most fixtures are listed as.
-var podResourceType = ResourceType{Version: "v1", Kind: "Pod", Plural: "pods", Namespaced: true}
+// The Resource types fixtures are listed as. ingressResourceType is the one the
+// irregular-plural cases turn on.
+var (
+	podResourceType        = ResourceType{Version: "v1", Kind: "Pod", Plural: "pods", Namespaced: true}
+	deploymentResourceType = ResourceType{Group: "apps", Version: "v1", Kind: "Deployment", Plural: "deployments", Namespaced: true}
+	ingressResourceType    = ResourceType{Group: "networking.k8s.io", Version: "v1", Kind: "Ingress", Plural: "ingresses", Namespaced: true}
+)
 
 // mustTarget builds a Target for tests that drive the functions behind it.
 func mustTarget(t *testing.T, obj metav1.Object, rt ResourceType) Target {
@@ -40,9 +45,7 @@ func TestNewTargetFromUnstructured(t *testing.T) {
 		},
 	}}
 
-	got := mustTarget(t, obj, ResourceType{
-		Group: "apps", Version: "v1", Kind: "Deployment", Plural: "deployments", Namespaced: true,
-	})
+	got := mustTarget(t, obj, deploymentResourceType)
 
 	if got.Kind != "Deployment" {
 		t.Errorf("Kind = %q, want %q", got.Kind, "Deployment")
@@ -113,8 +116,7 @@ func TestNewTargetFromNamespace(t *testing.T) {
 // replaced, and what these cases stop coming back.
 func TestNewTargetCarriesTheListedResourceType(t *testing.T) {
 	for _, rt := range []ResourceType{
-		{Group: "apps", Version: "v1", Kind: "Deployment", Plural: "deployments", Namespaced: true},
-		{Group: "networking.k8s.io", Version: "v1", Kind: "Ingress", Plural: "ingresses", Namespaced: true},
+		ingressResourceType,
 		{Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy", Plural: "networkpolicies", Namespaced: true},
 	} {
 		t.Run(rt.Kind, func(t *testing.T) {
