@@ -4,85 +4,32 @@ import (
 	"context"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/client-go/dynamic"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 )
 
 // Janitor handles the cleanup of Kubernetes resources
 type Janitor struct {
-	client        kubernetes.Interface
-	dynamicClient dynamic.Interface
-	config        *Config
-	cache         map[string]interface{}
-	debug         bool
+	cluster Cluster
+	config  *Config
+	cache   map[string]interface{}
 }
 
-// New creates a new Janitor instance
-func New(config *Config) (*Janitor, error) {
-	// Create the Kubernetes client
-	client, err := getKubeClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Kubernetes client: %v", err)
-	}
-
-	dynamicClient, err := getDynamicClient()
-	if err != nil {
-		return nil, fmt.Errorf("failed to create dynamic client: %v", err)
-	}
-
+// New creates a Janitor that works through the given Cluster.
+func New(config *Config, cluster Cluster) *Janitor {
 	return &Janitor{
-		client:        client,
-		dynamicClient: dynamicClient,
-		config:        config,
-		cache:         make(map[string]interface{}),
-		debug:         config.Debug,
-	}, nil
-}
-
-// getDynamicClient creates a new dynamic client for the Kubernetes cluster
-func getDynamicClient() (dynamic.Interface, error) {
-	var config *rest.Config
-	var err error
-
-	// Try in-cluster config first
-	config, err = rest.InClusterConfig()
-	if err != nil {
-		// Fall back to kubeconfig
-		kubeconfigPath := os.Getenv("KUBECONFIG")
-		if kubeconfigPath == "" {
-			// If KUBECONFIG is not set, use default location
-			homeDir, err := os.UserHomeDir()
-			if err == nil {
-				kubeconfigPath = filepath.Join(homeDir, ".kube", "config")
-			}
-		}
-
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create config: %v (try setting KUBECONFIG environment variable)", err)
-		}
+		cluster: cluster,
+		config:  config,
+		cache:   make(map[string]interface{}),
 	}
-
-	dynamicClient, err := dynamic.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create dynamic client: %v", err)
-	}
-
-	return dynamicClient, nil
 }
 
 // debugLog logs a message if debug mode is enabled
 func (j *Janitor) debugLog(format string, args ...interface{}) {
-	if j.debug {
+	if j.config.Debug {
 		log.Printf("DEBUG: "+format, args...)
 	}
 }
@@ -98,7 +45,7 @@ func (j *Janitor) infoLog(format string, args ...interface{}) {
 func (j *Janitor) CleanUp(ctx context.Context) error {
 	j.debugLog("Starting cleanup run")
 
-	resourceTypes, err := GetResourceTypes(j.client)
+	resourceTypes, err := GetResourceTypes(j.cluster.Typed)
 	if err != nil {
 		return fmt.Errorf("failed to get resource types: %v", err)
 	}
@@ -137,7 +84,7 @@ func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType Resource
 
 	j.debugLog("Getting namespaces for resource type: %s", resourceType.Kind)
 	// Get all namespaces
-	namespaces, err := j.client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	namespaces, err := j.cluster.Typed.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list namespaces: %v", err)
 	}
@@ -237,7 +184,7 @@ func (j *Janitor) listNamespacedResources(ctx context.Context, resourceType Reso
 		Resource: resourceType.Plural,
 	}
 
-	list, err := j.dynamicClient.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
+	list, err := j.cluster.Dynamic.Resource(gvr).Namespace(namespace).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list %s in namespace %s: %v", resourceType.Kind, namespace, err)
 	}
@@ -261,7 +208,7 @@ func (j *Janitor) listClusterResources(ctx context.Context, resourceType Resourc
 		Resource: resourceType.Plural,
 	}
 
-	list, err := j.dynamicClient.Resource(gvr).List(ctx, metav1.ListOptions{})
+	list, err := j.cluster.Dynamic.Resource(gvr).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("failed to list cluster-scoped %s: %v", resourceType.Kind, err)
 	}
@@ -276,38 +223,6 @@ func (j *Janitor) listClusterResources(ctx context.Context, resourceType Resourc
 	}
 
 	return resources, nil
-}
-
-// getKubeClient creates a new Kubernetes client
-func getKubeClient() (kubernetes.Interface, error) {
-	var config *rest.Config
-	var err error
-
-	// Try in-cluster config first
-	config, err = rest.InClusterConfig()
-	if err != nil {
-		// Fall back to kubeconfig
-		kubeconfigPath := os.Getenv("KUBECONFIG")
-		if kubeconfigPath == "" {
-			// If KUBECONFIG is not set, use default location
-			homeDir, err := os.UserHomeDir()
-			if err == nil {
-				kubeconfigPath = filepath.Join(homeDir, ".kube", "config")
-			}
-		}
-
-		config, err = clientcmd.BuildConfigFromFlags("", kubeconfigPath)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create config: %v (try setting KUBECONFIG environment variable)", err)
-		}
-	}
-
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create client: %v", err)
-	}
-
-	return clientset, nil
 }
 
 func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[string]int) error {
@@ -365,7 +280,7 @@ func (j *Janitor) cleanupNamespaces(ctx context.Context, counter map[string]int)
 	}
 
 	j.debugLog("Listing all namespaces")
-	namespaces, err := j.client.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	namespaces, err := j.cluster.Typed.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return fmt.Errorf("failed to list namespaces: %v", err)
 	}
@@ -439,7 +354,7 @@ func (j *Janitor) logCleanupSummary(counter map[string]int) {
 
 	log.Printf("Clean up run completed: %s", strings.Join(stats, ", "))
 
-	if j.debug {
+	if j.config.Debug {
 		j.debugLog("Detailed counter values:")
 		for k, v := range counter {
 			j.debugLog("  %s: %d", k, v)

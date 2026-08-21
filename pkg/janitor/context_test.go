@@ -101,10 +101,7 @@ func TestGetPVCContext(t *testing.T) {
 			clientset := fake.NewSimpleClientset()
 
 			// Create janitor instance with fake client
-			j := &Janitor{
-				client: clientset,
-				cache:  make(map[string]interface{}),
-			}
+			j := New(&Config{}, Cluster{Typed: clientset})
 
 			// Create test resources in fake client
 			if tt.pvc != nil {
@@ -175,13 +172,7 @@ func TestGetResourceContext(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			j := &Janitor{
-				client: fake.NewSimpleClientset(),
-				config: &Config{
-					ResourceContextHook: tt.hook,
-				},
-				cache: make(map[string]interface{}),
-			}
+			j := New(&Config{ResourceContextHook: tt.hook}, Cluster{Typed: fake.NewSimpleClientset()})
 
 			// Run setup if provided
 			if tt.setup != nil {

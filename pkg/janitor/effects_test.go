@@ -27,30 +27,39 @@ type effectsFixture struct {
 func newEffectsFixture(t *testing.T, cfg *Config) effectsFixture {
 	t.Helper()
 
-	obj := podObject(time.Hour, map[string]string{TTLAnnotation: "1h"})
-
-	scheme := runtime.NewScheme()
-	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
-		scheme,
-		map[schema.GroupVersionResource]string{podGVR: "PodList"},
-		obj,
-	)
+	obj := podObject("staging", "web", time.Hour, map[string]string{TTLAnnotation: "1h"})
 
 	return effectsFixture{
-		janitor: &Janitor{
-			client:        fake.NewSimpleClientset(),
-			dynamicClient: dyn,
-			config:        cfg,
-			cache:         make(map[string]interface{}),
-		},
+		janitor: New(cfg, Cluster{
+			Typed:   fake.NewSimpleClientset(),
+			Dynamic: podDynamicClient(obj),
+		}),
 		target: mustTarget(t, obj),
 	}
+}
+
+// podDynamicClient is a dynamic fake that knows how to list pods.
+func podDynamicClient(objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
+		runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{podGVR: "PodList"},
+		objects...,
+	)
+}
+
+// podExists reports whether the janitor's cluster still holds the named pod.
+func podExists(t *testing.T, j *Janitor, namespace, name string) bool {
+	t.Helper()
+
+	_, err := j.cluster.Dynamic.Resource(podGVR).Namespace(namespace).
+		Get(context.Background(), name, metav1.GetOptions{})
+	return err == nil
 }
 
 func (f effectsFixture) events(t *testing.T) []string {
 	t.Helper()
 
-	list, err := f.janitor.client.CoreV1().Events("staging").List(context.Background(), metav1.ListOptions{})
+	list, err := f.janitor.cluster.Typed.CoreV1().Events("staging").List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		t.Fatalf("listing events: %v", err)
 	}
@@ -60,14 +69,6 @@ func (f effectsFixture) events(t *testing.T) []string {
 		reasons = append(reasons, e.Reason)
 	}
 	return reasons
-}
-
-func (f effectsFixture) podExists(t *testing.T) bool {
-	t.Helper()
-
-	_, err := f.janitor.dynamicClient.Resource(podGVR).Namespace("staging").
-		Get(context.Background(), "web", metav1.GetOptions{})
-	return err == nil
 }
 
 func TestApplyDelete(t *testing.T) {
@@ -88,7 +89,7 @@ func TestApplyDelete(t *testing.T) {
 	if got := f.events(t); len(got) != 1 || got[0] != "TTLExpired" {
 		t.Errorf("event reasons = %v, want [TTLExpired]", got)
 	}
-	if f.podExists(t) {
+	if podExists(t, f.janitor, f.target.Namespace, f.target.Name) {
 		t.Error("pod still exists, want it deleted")
 	}
 }
@@ -103,7 +104,7 @@ func TestApplyNone(t *testing.T) {
 	if got := f.events(t); len(got) != 0 {
 		t.Errorf("event reasons = %v, want none", got)
 	}
-	if !f.podExists(t) {
+	if !podExists(t, f.janitor, f.target.Namespace, f.target.Name) {
 		t.Error("pod was deleted, want it left alone")
 	}
 }
@@ -124,7 +125,7 @@ func TestApplyDryRunWritesNothing(t *testing.T) {
 	if got := f.events(t); len(got) != 0 {
 		t.Errorf("event reasons = %v, want none in dry run", got)
 	}
-	if !f.podExists(t) {
+	if !podExists(t, f.janitor, f.target.Namespace, f.target.Name) {
 		t.Error("pod was deleted in dry run, want it left alone")
 	}
 }
@@ -139,7 +140,7 @@ func TestApplyStampsEventsWithTheDecisionTime(t *testing.T) {
 		t.Fatalf("Apply() error = %v", err)
 	}
 
-	list, err := f.janitor.client.CoreV1().Events("staging").List(context.Background(), metav1.ListOptions{})
+	list, err := f.janitor.cluster.Typed.CoreV1().Events("staging").List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		t.Fatalf("listing events: %v", err)
 	}
@@ -154,8 +155,8 @@ func TestApplyStampsEventsWithTheDecisionTime(t *testing.T) {
 	if !event.LastTimestamp.Time.Equal(now) {
 		t.Errorf("LastTimestamp = %v, want %v", event.LastTimestamp.Time, now)
 	}
-	if event.InvolvedObject.Kind != "Pod" || event.InvolvedObject.UID != "pod-uid" {
-		t.Errorf("InvolvedObject = %+v, want Pod/pod-uid", event.InvolvedObject)
+	if event.InvolvedObject.Kind != "Pod" || event.InvolvedObject.UID != f.target.UID {
+		t.Errorf("InvolvedObject = %+v, want Pod/%s", event.InvolvedObject, f.target.UID)
 	}
 }
 
@@ -218,7 +219,7 @@ func TestApplyNotify(t *testing.T) {
 	if got := f.events(t); len(got) != 1 || got[0] != "DeleteNotification" {
 		t.Errorf("event reasons = %v, want [DeleteNotification]", got)
 	}
-	if !f.podExists(t) {
+	if !podExists(t, f.janitor, f.target.Namespace, f.target.Name) {
 		t.Error("pod was deleted on a notify verdict, want it left alone")
 	}
 

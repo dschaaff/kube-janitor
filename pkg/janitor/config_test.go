@@ -266,11 +266,7 @@ func TestNamespaceCleanupWithTTL(t *testing.T) {
 				DryRun:            true,
 			}
 
-			j := &Janitor{
-				client: clientset,
-				config: config,
-				cache:  make(map[string]interface{}),
-			}
+			j := New(config, Cluster{Typed: clientset})
 
 			// Track which namespaces were processed by checking the matchesResourceFilter
 			for _, ns := range tt.namespaces {
@@ -336,11 +332,7 @@ func TestNamespaceClusterResourcesBug(t *testing.T) {
 	// Create fake client and add the namespace
 	clientset := fake.NewSimpleClientset(testNamespace)
 
-	j := &Janitor{
-		client: clientset,
-		config: config,
-		cache:  make(map[string]interface{}),
-	}
+	j := New(config, Cluster{Typed: clientset})
 
 	// Test using the real namespace object (as cleanupNamespaces does)
 	matches := j.matchesResourceFilter(mustTarget(t, testNamespace))
