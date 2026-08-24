@@ -61,7 +61,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	j := janitor.New(config, cluster)
+	j := janitor.New(config, cluster, logger)
 
 	// Set up context with cancellation and signal handling
 	ctx, gs := shutdown.ShutdownWithContext()

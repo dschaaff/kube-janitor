@@ -2,6 +2,7 @@ package janitor
 
 import (
 	"context"
+	"io"
 	"testing"
 
 	appsv1 "k8s.io/api/apps/v1"
@@ -106,7 +107,7 @@ func TestGetPVCContext(t *testing.T) {
 			clientset := fake.NewSimpleClientset()
 
 			// Create janitor instance with fake client
-			j := New(&Config{}, Cluster{Typed: clientset})
+			j := New(&Config{}, Cluster{Typed: clientset}, NewLogger(&Config{}, io.Discard))
 
 			// Create test resources in fake client
 			if tt.pvc != nil {
@@ -177,7 +178,8 @@ func TestGetResourceContext(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			j := New(&Config{ResourceContextHook: tt.hook}, Cluster{Typed: fake.NewSimpleClientset()})
+			cfg := &Config{ResourceContextHook: tt.hook}
+			j := New(cfg, Cluster{Typed: fake.NewSimpleClientset()}, NewLogger(cfg, io.Discard))
 
 			// Run setup if provided
 			if tt.setup != nil {

@@ -3,7 +3,6 @@ package janitor
 import (
 	"context"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -19,12 +18,16 @@ type Janitor struct {
 }
 
 // New creates a Janitor that works through the given Cluster, reporting what it
-// does in the format the Config names.
-func New(config *Config, cluster Cluster) *Janitor {
+// does through the given Logger.
+//
+// The Logger is passed in rather than built here, so that everything one
+// process writes goes through one Logger and a test can read back what a run
+// said.
+func New(config *Config, cluster Cluster, log *Logger) *Janitor {
 	return &Janitor{
 		cluster: cluster,
 		config:  config,
-		log:     NewLogger(config, os.Stderr),
+		log:     log,
 		cache:   make(map[string]interface{}),
 	}
 }
