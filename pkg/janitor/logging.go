@@ -10,9 +10,6 @@ import (
 	"time"
 )
 
-// loggerName is what %(name)s renders: the program a log line came from.
-const loggerName = "kube-janitor"
-
 // asctimeLayout is what %(asctime)s renders. It is the layout the janitor has
 // always printed, so a default format produces the line it always did.
 const asctimeLayout = "2006-01-02 15:04:05"
@@ -72,15 +69,19 @@ var logFields = map[string]logField{
 // placeholders, and the field that fills each gap. Compiling once means a run
 // does no parsing per line.
 type logFormat struct {
-	// literals holds one more entry than fields: the text before each field,
-	// then the text after the last one.
-	literals []string
-	fields   []logField
+	// literals holds one more entry than placeholders: the text before each
+	// one, then the text after the last one.
+	literals     []string
+	placeholders []placeholder
+}
 
-	// quoted says, per field, whether the format puts it between two double
-	// quotes. Such a field is a string in whatever the format is building, so
-	// its value is escaped rather than written through.
-	quoted []bool
+// placeholder is one gap a format leaves: the field that fills it, and whether
+// the format put that field between two double quotes. A quoted field is a
+// string in whatever the format is building, so its value is escaped rather
+// than written through.
+type placeholder struct {
+	field  logField
+	quoted bool
 }
 
 // parseLogFormat compiles a log format written in Python's logging syntax,
@@ -123,22 +124,26 @@ func parseLogFormat(format string) (logFormat, error) {
 
 		f.literals = append(f.literals, literal.String())
 		literal.Reset()
-		f.fields = append(f.fields, field)
+		f.placeholders = append(f.placeholders, placeholder{field: field})
 		i += end + 2
 	}
 
 	f.literals = append(f.literals, literal.String())
-	f.markQuotedFields()
+	f.markQuotedPlaceholders()
 	return f, nil
 }
 
-// markQuotedFields works out which fields the format wrapped in quotes. It can
-// only be decided once the whole format is compiled, because a field is quoted
-// by the literal after it as much as by the literal before it.
-func (f *logFormat) markQuotedFields() {
-	f.quoted = make([]bool, len(f.fields))
-	for i := range f.fields {
-		f.quoted[i] = strings.HasSuffix(f.literals[i], `"`) &&
+// markQuotedPlaceholders works out which fields the format wrapped in quotes.
+// It can only be decided once the whole format is compiled, because a field is
+// quoted by the literal after it as much as by the literal before it.
+//
+// Keying on the quotes rather than on the shape as a whole is what lets one
+// rule serve JSON and the logfmt-style formats alike. It is deliberately the
+// only structure this reads out of a format: a second such inference would
+// mean the format should name its shape instead of implying it.
+func (f *logFormat) markQuotedPlaceholders() {
+	for i := range f.placeholders {
+		f.placeholders[i].quoted = strings.HasSuffix(f.literals[i], `"`) &&
 			strings.HasPrefix(f.literals[i+1], `"`)
 	}
 }
@@ -173,7 +178,7 @@ func (r logRecord) value(field logField) string {
 	case fieldMessage:
 		return r.message
 	case fieldName:
-		return loggerName
+		return programName
 	}
 	return ""
 }
@@ -184,19 +189,24 @@ func (f logFormat) render(level logLevel, message string, now time.Time) string 
 
 	var line strings.Builder
 
-	for i, field := range f.fields {
+	for i, p := range f.placeholders {
 		line.WriteString(f.literals[i])
 
-		if f.quoted[i] {
-			writeQuotedValue(&line, rec.value(field))
+		value := rec.value(p.field)
+		if p.quoted {
+			writeQuotedValue(&line, value)
 		} else {
-			line.WriteString(rec.value(field))
+			line.WriteString(value)
 		}
 	}
 
 	line.WriteString(f.literals[len(f.literals)-1])
 	return line.String()
 }
+
+// hexDigits spells the \u escape writeQuotedValue emits for a control
+// character.
+const hexDigits = "0123456789abcdef"
 
 // writeQuotedValue writes value as the body of a quoted string, escaping the
 // characters that would otherwise end the string early or break the line in
@@ -217,7 +227,12 @@ func writeQuotedValue(line *strings.Builder, value string) {
 		case r == '\t':
 			line.WriteString(`\t`)
 		case r < 0x20:
-			fmt.Fprintf(line, `\u%04x`, r)
+			// Written out rather than handed to fmt: taking an io.Writer here
+			// would move the whole line's Builder to the heap, on every line.
+			// r < 0x20 means the top two nibbles are zero.
+			line.WriteString(`\u00`)
+			line.WriteByte(hexDigits[r>>4])
+			line.WriteByte(hexDigits[r&0xf])
 		default:
 			line.WriteRune(r)
 		}
@@ -252,21 +267,7 @@ func NewLogger(cfg *Config, out io.Writer) *Logger {
 		format, _ = parseLogFormat(defaultLogFormat)
 	}
 
-	return &Logger{format: format, min: lowestLevel(cfg), out: out}
-}
-
-// lowestLevel works out the least a run reports. Asking for a diagnosis beats
-// asking for quiet: a run given both is being diagnosed, and a diagnosis that
-// left out the ordinary course of the run would be a poor one.
-func lowestLevel(cfg *Config) logLevel {
-	switch {
-	case cfg.Debug:
-		return levelDebug
-	case cfg.Quiet:
-		return levelWarning
-	default:
-		return levelInfo
-	}
+	return &Logger{format: format, min: cfg.lowestLogLevel(), out: out}
 }
 
 // Debugf writes a line a run only wants when it is being diagnosed.
