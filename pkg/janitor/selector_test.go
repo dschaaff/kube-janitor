@@ -19,7 +19,7 @@ func refs(listings []listing) []string {
 }
 
 func selectorFor(configure func(*Config)) *selector {
-	cfg := NewConfig()
+	cfg := newConfig()
 	cfg.ExcludeResources = nil
 	cfg.ExcludeNamespaces = nil
 	if configure != nil {

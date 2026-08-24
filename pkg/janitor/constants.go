@@ -8,9 +8,4 @@ const (
 
 	// Special TTL value
 	TTLUnlimited = "forever"
-
-	// Default values
-	DefaultInterval          = 30
-	DefaultExcludeResources  = "events,controllerrevisions"
-	DefaultExcludeNamespaces = "kube-system"
 )

@@ -208,7 +208,7 @@ func TestCleanUp(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := NewConfig()
+			cfg := newConfig()
 			if tt.configure != nil {
 				tt.configure(cfg)
 			}
@@ -251,7 +251,7 @@ func TestCleanUp(t *testing.T) {
 // produced "ingresss", which the include list rejected and the API server would
 // not have recognised.
 func TestCleanUpDeletesAnIrregularlyPluralisedResource(t *testing.T) {
-	cfg := NewConfig()
+	cfg := newConfig()
 	cfg.IncludeResources = []string{"ingresses"}
 
 	j := newRunFixture(t, cfg, clusterFixture{
@@ -275,7 +275,7 @@ func TestCleanUpDeletesAnIrregularlyPluralisedResource(t *testing.T) {
 // events and sent two notifications. The Selector yields one Listing per Resource
 // type, so there is no second reach to make.
 func TestCleanUpActsOnANamespaceOnce(t *testing.T) {
-	cfg := NewConfig()
+	cfg := newConfig()
 	cfg.IncludeClusterResources = true
 	cfg.DeleteNotification = int(time.Hour.Seconds())
 
@@ -303,7 +303,7 @@ func TestCleanUpActsOnANamespaceOnce(t *testing.T) {
 // Namespaces are the one cluster-scoped type a run handles without
 // --include-cluster-resources: see the flag's entry in the README.
 func TestCleanUpDeletesANamespaceWithoutClusterResources(t *testing.T) {
-	cfg := NewConfig()
+	cfg := newConfig()
 
 	j := newRunFixture(t, cfg, clusterFixture{
 		types:      []ResourceType{namespaceResourceType},
@@ -325,7 +325,7 @@ func TestCleanUpDeletesANamespaceWithoutClusterResources(t *testing.T) {
 // A namespace is excluded by name, the same lists that exclude the resources
 // inside it.
 func TestCleanUpLeavesAnExcludedNamespaceAlone(t *testing.T) {
-	cfg := NewConfig()
+	cfg := newConfig()
 
 	j := newRunFixture(t, cfg, clusterFixture{
 		types:      []ResourceType{namespaceResourceType},
@@ -356,7 +356,7 @@ func TestCleanUpLeavesAnExcludedNamespaceAlone(t *testing.T) {
 // again through the dynamic client, because that is the path every resource it
 // judges arrives by.
 func TestCleanUpReadsTheNamespaceListOnceToPlan(t *testing.T) {
-	cfg := NewConfig()
+	cfg := newConfig()
 
 	j := newRunFixture(t, cfg, clusterFixture{
 		types:      []ResourceType{podResourceType, deploymentResourceType, ingressResourceType},

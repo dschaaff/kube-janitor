@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"log"
 	"os"
@@ -8,7 +9,6 @@ import (
 	"time"
 
 	"github.com/dschaaff/kube-janitor/pkg/janitor"
-	"github.com/dschaaff/kube-janitor/pkg/janitor/hooks"
 	"github.com/dschaaff/kube-janitor/pkg/janitor/shutdown"
 )
 
@@ -22,13 +22,13 @@ func main() {
 	log.Printf("Kubernetes Janitor %s (built: %s, commit: %s) starting up...",
 		version, buildDate, gitCommit)
 
-	config := janitor.NewConfig()
-	config.AddFlags(flag.CommandLine)
-
-	flag.Parse() // Parse flags after they've been added to flag.CommandLine
-
-	// Parse the comma-separated string flags after flag.Parse()
-	config.ParseStringFlags()
+	config, err := janitor.LoadConfig(os.Args[1:], os.Getenv)
+	if err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return
+		}
+		log.Fatalf("Invalid configuration: %v", err)
+	}
 
 	if config.Debug {
 		log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -51,25 +51,6 @@ func main() {
 		}
 	} else {
 		log.Printf("Using KUBECONFIG from environment: %s", os.Getenv("KUBECONFIG"))
-	}
-
-	if err := config.Validate(); err != nil {
-		log.Fatalf("Invalid configuration: %v", err)
-	}
-
-	if hookName := os.Getenv("RESOURCE_CONTEXT_HOOK"); hookName != "" {
-		hookFunc, err := hooks.GetHook(hookName)
-		if err != nil {
-			log.Fatalf("Failed to get hook: %v", err)
-		}
-		// Convert hooks.ResourceContextHook to janitor.ResourceContextHook
-		config.ResourceContextHook = func(resource interface{}, cache map[string]interface{}) map[string]interface{} {
-			return hookFunc(resource, cache)
-		}
-	}
-
-	if err := config.LoadRules(); err != nil {
-		log.Fatalf("Failed to load rules: %v", err)
 	}
 
 	cluster, err := janitor.Connect()
@@ -113,5 +94,3 @@ func main() {
 		}
 	}
 }
-
-// getEnvOrDefault moved to pkg/janitor/config.go

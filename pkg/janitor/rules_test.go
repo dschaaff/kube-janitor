@@ -1,7 +1,6 @@
 package janitor
 
 import (
-	"os"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -173,21 +172,10 @@ rules:
   jmespath: "metadata.labels.environment == 'test'"
   ttl: "24h"
 `
-	tmpfile, err := os.CreateTemp("", "rules*.yaml")
-	if err != nil {
-		t.Fatalf("Failed to create temp file: %v", err)
-	}
-	defer os.Remove(tmpfile.Name())
-
-	if _, err := tmpfile.Write([]byte(content)); err != nil {
-		t.Fatalf("Failed to write to temp file: %v", err)
-	}
-	if err := tmpfile.Close(); err != nil {
-		t.Fatalf("Failed to close temp file: %v", err)
-	}
+	path := writeRulesFile(t, content)
 
 	// Test loading rules
-	rules, err := LoadRules(tmpfile.Name())
+	rules, err := LoadRules(path)
 	if err != nil {
 		t.Fatalf("LoadRules() error = %v", err)
 	}
