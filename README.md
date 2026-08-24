@@ -199,6 +199,22 @@ you want the resources to not be cleaned up if they\'ve been
 recently redeployed, and your deployment tooling can set this
 annotation.
 
+`WEBHOOK_URL`
+
+: Optional: environment variable naming a URL that delete notifications
+are POSTed to as JSON, `{"message": "..."}`, alongside the Kubernetes
+event. Only used when `--delete-notification` is set. Each delivery is
+given 10 seconds; one that fails or times out is logged as a warning
+and does not stop the run. When unset, notifications are recorded as
+events only.
+
+`CONTEXT_NAME`
+
+: Optional: environment variable naming the cluster this janitor runs
+in. When set, delete notifications are prefixed with `[name]`, in both
+the Kubernetes event and the webhook payload, so notifications from
+several clusters can be told apart.
+
 `RESOURCE_CONTEXT_HOOK`
 
 : Optional: environment variable naming a built-in hook that

@@ -43,6 +43,12 @@ type Config struct {
 	IncludeClusterResources  bool
 	LogFormat                string
 
+	// Settings the environment names on its own, having no flag beside them.
+	// WebhookURL is where a Notification is delivered, and ContextName names
+	// the cluster a Notification says it came from.
+	WebhookURL  string
+	ContextName string
+
 	// Additional configuration
 	Rules               []Rule
 	ResourceContextHook ResourceContextHook
@@ -131,7 +137,12 @@ func newFlagSet(env func(string) string) (*Config, *flag.FlagSet) {
 // unset or empty leaves the default alone, which is how a container image
 // unsets one it inherited.
 //
-// Nothing here can fail: it only decides what a flag's default is. The settings
+// Some settings have no flag beside them and are only ever named here; they
+// are read in the same place as the rest so that the whole of a Configuration
+// is settled before the first Listing, and nothing reaches for the environment
+// again once a run has started.
+//
+// Nothing here can fail: it only decides what a setting starts as. The settings
 // the environment names that could be wrong are resolved after the arguments
 // are parsed, so a run that only asked for usage still gets it.
 func (c *Config) applyEnv(env func(string) string) {
@@ -141,14 +152,20 @@ func (c *Config) applyEnv(env func(string) string) {
 		}
 	}
 
+	text := func(key string, target *string) {
+		if value := env(key); value != "" {
+			*target = value
+		}
+	}
+
 	list("INCLUDE_RESOURCES", &c.IncludeResources)
 	list("EXCLUDE_RESOURCES", &c.ExcludeResources)
 	list("INCLUDE_NAMESPACES", &c.IncludeNamespaces)
 	list("EXCLUDE_NAMESPACES", &c.ExcludeNamespaces)
 
-	if value := env("RULES_FILE"); value != "" {
-		c.RulesFile = value
-	}
+	text("RULES_FILE", &c.RulesFile)
+	text("WEBHOOK_URL", &c.WebhookURL)
+	text("CONTEXT_NAME", &c.ContextName)
 }
 
 // resolveHook looks up the resource context hook the environment named, so that
@@ -238,6 +255,18 @@ func (c *Config) validate() error {
 	}
 
 	return nil
+}
+
+// notificationPrefix names the cluster a Notification came from, when the
+// Configuration gives it a name to go by. A Notification is worded once, when
+// the Verdict is reached, so the event, the delivery and the dry-run preview
+// cannot disagree about which cluster is talking.
+func (c *Config) notificationPrefix() string {
+	if c.ContextName == "" {
+		return ""
+	}
+
+	return "[" + c.ContextName + "] "
 }
 
 // lowestLogLevel works out the least a run reports. Asking for a diagnosis

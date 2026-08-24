@@ -71,7 +71,7 @@ func newRunFixture(t *testing.T, cfg *Config, f clusterFixture) *Janitor {
 	}
 
 	return New(cfg, Cluster{Typed: typed, Dynamic: dynamicClientFor(f.types, listed...)},
-		NewLogger(cfg, out))
+		NewLogger(cfg, out), discardNotifier{})
 }
 
 // events reports the Kubernetes events a run recorded, in order. Counting them is

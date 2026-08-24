@@ -50,8 +50,8 @@ type Verdict struct {
 	// EventReason is recorded as the Reason of the Kubernetes event.
 	EventReason string
 
-	// Message describes the action in full, without the context name prefix that
-	// notifications carry.
+	// Message describes the action in full, worded the way everything that
+	// reports it will say it.
 	Message string
 }
 
@@ -212,7 +212,7 @@ func conclude(t Target, cfg *Config, now time.Time, s deadlineSource) Verdict {
 				Deadline:    s.deadline,
 				Source:      s.source,
 				EventReason: "DeleteNotification",
-				Message: fmt.Sprintf("%s will be deleted at %s (%s)",
+				Message: cfg.notificationPrefix() + fmt.Sprintf("%s will be deleted at %s (%s)",
 					t.describe(), s.deadline.Format(time.RFC3339), s.detail()),
 			}
 		}
