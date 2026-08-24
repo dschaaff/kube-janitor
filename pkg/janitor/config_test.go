@@ -312,10 +312,40 @@ func TestLoadConfigResolvesTheResourceContextHook(t *testing.T) {
 // Usage is not a bad configuration: a caller tells the two apart so that
 // -help exits successfully.
 func TestLoadConfigReportsAskingForUsage(t *testing.T) {
-	_, err := LoadConfig([]string{"-help"}, noEnv)
+	tests := []struct {
+		name string
+		env  map[string]string
+	}{
+		{name: "nothing in the environment"},
+		{
+			// Asking what the options are is answerable whatever the environment
+			// holds, so a variable that would sink a run must not sink -help.
+			name: "an environment that would not load",
+			env:  map[string]string{"RESOURCE_CONTEXT_HOOK": "nonesuch", "RULES_FILE": "/nowhere.yaml"},
+		},
+	}
 
-	if !errors.Is(err, flag.ErrHelp) {
-		t.Errorf("LoadConfig(-help) = %v, want flag.ErrHelp", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := LoadConfig([]string{"-help"}, envOf(tt.env)); !errors.Is(err, flag.ErrHelp) {
+				t.Errorf("LoadConfig(-help) = %v, want flag.ErrHelp", err)
+			}
+		})
+	}
+}
+
+// Usage prints the default each flag would actually take, so what a run is
+// told matches what it would do rather than what the source says.
+func TestUsageShowsTheDefaultsThisEnvironmentGives(t *testing.T) {
+	var out strings.Builder
+	Usage(&out, envOf(map[string]string{"EXCLUDE_NAMESPACES": "kube-system,kube-public"}))
+
+	printed := out.String()
+
+	for _, want := range []string{"-exclude-namespaces", "kube-system,kube-public", "-log-format", "-interval"} {
+		if !strings.Contains(printed, want) {
+			t.Errorf("usage does not mention %q:\n%s", want, printed)
+		}
 	}
 }
 
