@@ -17,15 +17,34 @@ const loggerName = "kube-janitor"
 // always printed, so a default format produces the line it always did.
 const asctimeLayout = "2006-01-02 15:04:05"
 
-// The levels a line can carry. They are the names Python's logging module uses,
-// because the log format is written in its placeholder syntax and %(levelname)s
-// is expected to render the same words.
+// logLevel says what kind of thing a line reports. The levels are ordered from
+// the one only a diagnosed run wants to the one no run can suppress, so a run
+// keeps a single lowest level rather than one switch per level.
+type logLevel int
+
 const (
-	levelDebug   = "DEBUG"
-	levelInfo    = "INFO"
-	levelWarning = "WARNING"
-	levelError   = "ERROR"
+	levelDebug logLevel = iota
+	levelInfo
+	levelWarning
+	levelError
 )
+
+// String names the level the way Python's logging module does, because the log
+// format is written in its placeholder syntax and %(levelname)s is expected to
+// render the same words.
+func (l logLevel) String() string {
+	switch l {
+	case levelDebug:
+		return "DEBUG"
+	case levelInfo:
+		return "INFO"
+	case levelWarning:
+		return "WARNING"
+	case levelError:
+		return "ERROR"
+	}
+	return "UNKNOWN"
+}
 
 // logField is one value a log format interpolates.
 type logField int
@@ -118,25 +137,39 @@ func knownLogFields() []string {
 	return names
 }
 
+// logRecord is the one event a line reports, before the format has had its say.
+type logRecord struct {
+	level   logLevel
+	message string
+	now     time.Time
+}
+
+// value renders the one field of the record a placeholder names.
+func (r logRecord) value(field logField) string {
+	switch field {
+	case fieldAsctime:
+		return r.now.Format(asctimeLayout)
+	case fieldCreated:
+		return strconv.FormatFloat(float64(r.now.UnixNano())/1e9, 'f', 3, 64)
+	case fieldLevelName:
+		return r.level.String()
+	case fieldMessage:
+		return r.message
+	case fieldName:
+		return loggerName
+	}
+	return ""
+}
+
 // render builds one line from the compiled template.
-func (f logFormat) render(level, message string, now time.Time) string {
+func (f logFormat) render(level logLevel, message string, now time.Time) string {
+	rec := logRecord{level: level, message: message, now: now}
+
 	var line strings.Builder
 
 	for i, field := range f.fields {
 		line.WriteString(f.literals[i])
-
-		switch field {
-		case fieldAsctime:
-			line.WriteString(now.Format(asctimeLayout))
-		case fieldCreated:
-			line.WriteString(strconv.FormatFloat(float64(now.UnixNano())/1e9, 'f', 3, 64))
-		case fieldLevelName:
-			line.WriteString(level)
-		case fieldMessage:
-			line.WriteString(message)
-		case fieldName:
-			line.WriteString(loggerName)
-		}
+		line.WriteString(rec.value(field))
 	}
 
 	line.WriteString(f.literals[len(f.literals)-1])
@@ -145,16 +178,17 @@ func (f logFormat) render(level, message string, now time.Time) string {
 
 // Logger writes one line per event, in the format the Configuration names.
 //
-// It also decides which lines are written at all: debug lines only when debug
-// is on, and info lines unless the run is quiet. Warnings and errors are always
-// written, so a quiet run still reports what went wrong.
+// It also decides which lines are written at all, from the one lowest level the
+// Configuration works out to. Nothing that emits a line checks whether the line
+// is wanted.
 type Logger struct {
 	format logFormat
-	debug  bool
-	quiet  bool
+	min    logLevel
 
 	// mu keeps one line from interleaving with another, which is the guarantee
-	// the standard log package gave before.
+	// the standard log package gave before. It only holds for lines written
+	// through this Logger, so a process builds one and passes it around rather
+	// than building a second onto the same writer.
 	mu  sync.Mutex
 	out io.Writer
 }
@@ -170,21 +204,31 @@ func NewLogger(cfg *Config, out io.Writer) *Logger {
 		format, _ = parseLogFormat(defaultLogFormat)
 	}
 
-	return &Logger{format: format, debug: cfg.Debug, quiet: cfg.Quiet, out: out}
+	return &Logger{format: format, min: lowestLevel(cfg), out: out}
+}
+
+// lowestLevel works out the least a run reports. Asking for a diagnosis beats
+// asking for quiet: a run given both is being diagnosed, and a diagnosis that
+// left out the ordinary course of the run would be a poor one.
+func lowestLevel(cfg *Config) logLevel {
+	switch {
+	case cfg.Debug:
+		return levelDebug
+	case cfg.Quiet:
+		return levelWarning
+	default:
+		return levelInfo
+	}
 }
 
 // Debugf writes a line a run only wants when it is being diagnosed.
 func (l *Logger) Debugf(format string, args ...interface{}) {
-	if l.debug {
-		l.write(levelDebug, format, args)
-	}
+	l.write(levelDebug, format, args)
 }
 
 // Infof writes a line describing the ordinary course of a run.
 func (l *Logger) Infof(format string, args ...interface{}) {
-	if !l.quiet {
-		l.write(levelInfo, format, args)
-	}
+	l.write(levelInfo, format, args)
 }
 
 // Warnf writes a line about something a run worked around.
@@ -200,11 +244,16 @@ func (l *Logger) Errorf(format string, args ...interface{}) {
 // write renders one line and puts it out whole. The message is formatted only
 // once the level has been admitted, so a suppressed line costs nothing beyond
 // the call.
-func (l *Logger) write(level, format string, args []interface{}) {
+func (l *Logger) write(level logLevel, format string, args []interface{}) {
+	if level < l.min {
+		return
+	}
+
 	line := l.format.render(level, fmt.Sprintf(format, args...), time.Now())
 
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	fmt.Fprintln(l.out, line)
+	// Nowhere left to report a writer that will not take a log line.
+	_, _ = fmt.Fprintln(l.out, line)
 }
