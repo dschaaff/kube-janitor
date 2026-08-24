@@ -125,7 +125,17 @@ func TestLoadConfig(t *testing.T) {
 			// An empty variable is how a container image unsets one it inherited,
 			// and must not narrow the run to a list holding one empty name.
 			name: "an empty environment variable leaves the default alone",
-			env:  map[string]string{"INCLUDE_RESOURCES": "", "EXCLUDE_NAMESPACES": "", "RULES_FILE": ""},
+			env: map[string]string{
+				"INCLUDE_RESOURCES": "", "EXCLUDE_NAMESPACES": "", "RULES_FILE": "",
+				"WEBHOOK_URL": "", "CONTEXT_NAME": "",
+			},
+		},
+		{
+			// Neither has a flag beside it: the environment is the only thing that
+			// names them, and it names them before the run starts.
+			name: "the webhook and context name the environment named",
+			env:  map[string]string{"WEBHOOK_URL": "https://hooks.test/x", "CONTEXT_NAME": "prod-eu"},
+			want: func(c *Config) { c.WebhookURL, c.ContextName = "https://hooks.test/x", "prod-eu" },
 		},
 		{
 			name: "every switch turned on",

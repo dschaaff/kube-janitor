@@ -1,12 +1,8 @@
 package janitor
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
-	"net/http"
-	"os"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -41,17 +37,15 @@ func (j *Janitor) notify(ctx context.Context, t Target, v Verdict, now time.Time
 		return nil
 	}
 
-	message := v.Message
-	if contextName := os.Getenv("CONTEXT_NAME"); contextName != "" {
-		message = "[" + contextName + "] " + message
-	}
-
-	if err := j.createEvent(ctx, t, message, v.EventReason, now); err != nil {
+	if err := j.createEvent(ctx, t, v.Message, v.EventReason, now); err != nil {
 		return err
 	}
 
-	if err := SendWebhookNotification(message); err != nil {
-		j.log.Warnf("Failed to send webhook notification: %v", err)
+	// A Notification that could not be delivered is worth reporting but is not
+	// worth stopping the run for: the event recording the same warning is
+	// already in the cluster.
+	if err := j.notifier.Notify(ctx, v.Message); err != nil {
+		j.log.Warnf("Failed to deliver notification for %s: %v", t.describe(), err)
 	}
 
 	// Flags the target as notified for the rest of this run only. Nothing writes
@@ -133,35 +127,6 @@ func (j *Janitor) deleteResource(ctx context.Context, t Target) error {
 	if j.config.WaitAfterDelete > 0 {
 		j.log.Infof("Waiting %d seconds after delete", j.config.WaitAfterDelete)
 		time.Sleep(time.Duration(j.config.WaitAfterDelete) * time.Second)
-	}
-
-	return nil
-}
-
-// SendWebhookNotification sends a notification to a webhook
-func SendWebhookNotification(message string) error {
-	webhookURL := os.Getenv("WEBHOOK_URL")
-	if webhookURL == "" {
-		return nil
-	}
-
-	payload := WebhookMessage{
-		Message: message,
-	}
-
-	data, err := json.Marshal(payload)
-	if err != nil {
-		return fmt.Errorf("failed to marshal webhook payload: %v", err)
-	}
-
-	resp, err := http.Post(webhookURL, "application/json", bytes.NewBuffer(data))
-	if err != nil {
-		return fmt.Errorf("failed to send webhook: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode >= 300 {
-		return fmt.Errorf("webhook returned non-success status: %s", resp.Status)
 	}
 
 	return nil

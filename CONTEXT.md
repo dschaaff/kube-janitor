@@ -76,7 +76,11 @@ _Avoid_: Message (a Notification's wording is a message; a Log line is not),
 output, trace
 
 **Notification**:
-A warning that a Target is about to be deleted, sent ahead of its Deadline.
+A warning that a Target is about to be deleted, sent ahead of its Deadline. It is
+worded when the Verdict is reached, carrying the name of the cluster it came from
+when the Configuration gives one, so nothing that goes on to report it — the
+Kubernetes event, the delivery outside the cluster, a dry run's preview — can say
+something different.
 _Avoid_: Alert, message, event (a Notification may be recorded as a Kubernetes
 event, but the two are not the same thing)
 
@@ -89,8 +93,17 @@ _Avoid_: Evaluate, judge, check
 
 **Apply**:
 The module that carries out a Verdict against the cluster: recording an event,
-deleting the resource, sending a Notification.
+deleting the resource, handing a Notification to Deliver.
 _Avoid_: Execute, enact, perform, handle
+
+**Deliver**:
+The module that puts a Notification somewhere outside the cluster. A run is
+handed one and never builds its own, so a run configured with nowhere to send a
+Notification delivers to nowhere, and nothing along the way asks whether there
+was somewhere. A Notification that cannot be delivered is reported and the run
+carries on, because the event carrying the same warning is already recorded.
+_Avoid_: Webhook (one place a Notification may be delivered to), Notifier (the
+name of the thing, not of the module), send, publish
 
 **Selector**:
 The module that decides which resources a run considers at all, from the

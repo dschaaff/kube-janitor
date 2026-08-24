@@ -1,11 +1,10 @@
 package janitor
 
 import (
+	"bytes"
 	"context"
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -13,23 +12,30 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
-// effectsFixture is a janitor wired to fake clients, holding one pod.
+// effectsFixture is a janitor wired to fake clients and a recording Notifier,
+// holding one pod.
 type effectsFixture struct {
-	janitor *Janitor
-	target  Target
+	janitor  *Janitor
+	target   Target
+	notifier *recordingNotifier
+	logs     *bytes.Buffer
 }
 
 func newEffectsFixture(t *testing.T, cfg *Config) effectsFixture {
 	t.Helper()
 
+	notifier := &recordingNotifier{}
+	logs := &bytes.Buffer{}
 	obj := podObject("staging", "web", time.Hour, map[string]string{TTLAnnotation: "1h"})
 
 	return effectsFixture{
 		janitor: New(cfg, Cluster{
 			Typed:   fake.NewSimpleClientset(),
 			Dynamic: dynamicClientFor([]ResourceType{podResourceType}, obj),
-		}, NewLogger(cfg, io.Discard)),
-		target: mustTarget(t, obj, podResourceType),
+		}, NewLogger(cfg, logs), notifier),
+		target:   mustTarget(t, obj, podResourceType),
+		notifier: notifier,
+		logs:     logs,
 	}
 }
 
@@ -144,48 +150,7 @@ func TestApplyStampsEventsWithTheDecisionTime(t *testing.T) {
 	}
 }
 
-// webhookServer stands up a webhook endpoint, points WEBHOOK_URL at it, and
-// returns the channel the received message lands on.
-func webhookServer(t *testing.T) <-chan string {
-	t.Helper()
-
-	received := make(chan string, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			t.Errorf("webhook method = %s, want POST", r.Method)
-		}
-		body, _ := io.ReadAll(r.Body)
-
-		var payload WebhookMessage
-		if err := json.Unmarshal(body, &payload); err != nil {
-			t.Errorf("webhook payload is not valid JSON: %v", err)
-		}
-		received <- payload.Message
-		w.WriteHeader(http.StatusOK)
-	}))
-	t.Cleanup(server.Close)
-
-	t.Setenv("WEBHOOK_URL", server.URL)
-
-	return received
-}
-
-// awaitWebhook returns the message the webhook received, or fails.
-func awaitWebhook(t *testing.T, received <-chan string) string {
-	t.Helper()
-
-	select {
-	case got := <-received:
-		return got
-	case <-time.After(2 * time.Second):
-		t.Fatal("webhook was not called")
-		return ""
-	}
-}
-
 func TestApplyNotify(t *testing.T) {
-	received := webhookServer(t)
-
 	f := newEffectsFixture(t, &Config{DeleteNotification: 600})
 
 	verdict := Verdict{
@@ -207,8 +172,8 @@ func TestApplyNotify(t *testing.T) {
 		t.Error("pod was deleted on a notify verdict, want it left alone")
 	}
 
-	if got := awaitWebhook(t, received); got != verdict.Message {
-		t.Errorf("webhook message = %q, want %q", got, verdict.Message)
+	if got := f.notifier.messages; len(got) != 1 || got[0] != verdict.Message {
+		t.Errorf("delivered = %q, want [%q]", got, verdict.Message)
 	}
 
 	// Marks the target so the same run does not notify twice. This is not written
@@ -218,11 +183,64 @@ func TestApplyNotify(t *testing.T) {
 	}
 }
 
-func TestApplyNotifyPrefixesContextName(t *testing.T) {
-	received := webhookServer(t)
-	t.Setenv("CONTEXT_NAME", "prod-eu")
-
+// Apply reports the wording the Verdict carries, to both the event and the
+// delivery, without rewording either.
+func TestApplyNotifyReportsOneWording(t *testing.T) {
 	f := newEffectsFixture(t, &Config{DeleteNotification: 600})
+
+	verdict := Verdict{
+		Action:      ActionNotify,
+		EventReason: "DeleteNotification",
+		Message:     "[prod-eu] Pod staging/web will be deleted",
+	}
+
+	if err := f.janitor.Apply(context.Background(), f.target, verdict, now); err != nil {
+		t.Fatalf("Apply() error = %v", err)
+	}
+
+	if got := f.notifier.messages; len(got) != 1 || got[0] != verdict.Message {
+		t.Errorf("delivered = %q, want [%q]", got, verdict.Message)
+	}
+
+	recorded := events(t, f.janitor)
+	if len(recorded) != 1 || recorded[0].Message != verdict.Message {
+		t.Fatalf("events = %v, want one saying %q", recorded, verdict.Message)
+	}
+}
+
+// A webhook that will not take a Notification is reported, but the run carries
+// on: the event recording the same warning is already in the cluster.
+func TestApplyNotifySurvivesDeliveryFailure(t *testing.T) {
+	f := newEffectsFixture(t, &Config{DeleteNotification: 600})
+	f.notifier.err = errors.New("webhook is down")
+
+	verdict := Verdict{
+		Action:      ActionNotify,
+		EventReason: "DeleteNotification",
+		Message:     "Pod staging/web will be deleted",
+	}
+
+	if err := f.janitor.Apply(context.Background(), f.target, verdict, now); err != nil {
+		t.Fatalf("Apply() error = %v, want the run to carry on", err)
+	}
+
+	if got := f.notifier.messages; len(got) != 1 {
+		t.Errorf("delivery attempts = %d, want 1", len(got))
+	}
+	if got := f.events(t); len(got) != 1 || got[0] != "DeleteNotification" {
+		t.Errorf("event reasons = %v, want [DeleteNotification]", got)
+	}
+	if !f.target.wasNotified() {
+		t.Error("target is not marked notified")
+	}
+	if !strings.Contains(f.logs.String(), "webhook is down") {
+		t.Errorf("run reported %q, want the failed delivery reported", f.logs.String())
+	}
+}
+
+// Nothing leaves the process in a dry run, whatever the Notifier would do.
+func TestApplyNotifyDeliversNothingInDryRun(t *testing.T) {
+	f := newEffectsFixture(t, &Config{DeleteNotification: 600, DryRun: true})
 
 	verdict := Verdict{
 		Action:      ActionNotify,
@@ -234,8 +252,11 @@ func TestApplyNotifyPrefixesContextName(t *testing.T) {
 		t.Fatalf("Apply() error = %v", err)
 	}
 
-	if got, want := awaitWebhook(t, received), "[prod-eu] Pod staging/web will be deleted"; got != want {
-		t.Errorf("webhook message = %q, want %q", got, want)
+	if got := f.notifier.messages; len(got) != 0 {
+		t.Errorf("delivered = %q, want nothing in a dry run", got)
+	}
+	if got := f.events(t); len(got) != 0 {
+		t.Errorf("event reasons = %v, want none in a dry run", got)
 	}
 }
 

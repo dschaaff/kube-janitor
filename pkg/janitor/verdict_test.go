@@ -1,6 +1,7 @@
 package janitor
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -528,5 +529,40 @@ func TestDecideMessages(t *testing.T) {
 				t.Errorf("Message  = %q\nwant     = %q", got.Message, want)
 			}
 		})
+	}
+}
+
+// The cluster a Notification came from is named when the Verdict is reached, so
+// everything that goes on to report it says the same thing.
+func TestDecideNamesTheClusterInANotification(t *testing.T) {
+	target := pod(t, 55*time.Minute, map[string]string{TTLAnnotation: "1h"})
+
+	got, err := Decide(target, &Config{DeleteNotification: 600, ContextName: "prod-eu"}, now, nil)
+	if err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+
+	if got.Action != ActionNotify {
+		t.Fatalf("Action = %v, want %v", got.Action, ActionNotify)
+	}
+	if !strings.HasPrefix(got.Message, "[prod-eu] ") {
+		t.Errorf("Message = %q, want it to name the cluster", got.Message)
+	}
+}
+
+// A delete says nothing about the cluster: only a Notification leaves it.
+func TestDecideNamesNoClusterInADelete(t *testing.T) {
+	target := pod(t, 2*time.Hour, map[string]string{TTLAnnotation: "1h"})
+
+	got, err := Decide(target, &Config{DeleteNotification: 600, ContextName: "prod-eu"}, now, nil)
+	if err != nil {
+		t.Fatalf("Decide() error = %v", err)
+	}
+
+	if got.Action != ActionDelete {
+		t.Fatalf("Action = %v, want %v", got.Action, ActionDelete)
+	}
+	if strings.Contains(got.Message, "prod-eu") {
+		t.Errorf("Message = %q, want no cluster name on a delete", got.Message)
 	}
 }

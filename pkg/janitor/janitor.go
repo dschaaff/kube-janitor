@@ -11,24 +11,27 @@ import (
 
 // Janitor handles the cleanup of Kubernetes resources
 type Janitor struct {
-	cluster Cluster
-	config  *Config
-	log     *Logger
-	cache   map[string]interface{}
+	cluster  Cluster
+	config   *Config
+	log      *Logger
+	notifier Notifier
+	cache    map[string]interface{}
 }
 
 // New creates a Janitor that works through the given Cluster, reporting what it
-// does through the given Logger.
+// does through the given Logger and delivering its Notifications through the
+// given Notifier.
 //
-// The Logger is passed in rather than built here, so that everything one
-// process writes goes through one Logger and a test can read back what a run
-// said.
-func New(config *Config, cluster Cluster, log *Logger) *Janitor {
+// Everything a run reaches the outside world through is passed in rather than
+// built here: one process writes through one Logger, and the whole of a run can
+// be exercised against fakes.
+func New(config *Config, cluster Cluster, log *Logger, notifier Notifier) *Janitor {
 	return &Janitor{
-		cluster: cluster,
-		config:  config,
-		log:     log,
-		cache:   make(map[string]interface{}),
+		cluster:  cluster,
+		config:   config,
+		log:      log,
+		notifier: notifier,
+		cache:    make(map[string]interface{}),
 	}
 }
 
