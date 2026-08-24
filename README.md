@@ -129,9 +129,10 @@ run is diagnosed: `--debug` wins.
 (`kube-janitor`) and `%(message)s`. Write `%%` for a literal percent
 sign. A format naming any other placeholder is refused at startup.
 
-: A placeholder written between two double quotes is escaped as a
-string value, so a format that builds JSON keeps producing JSON even
-when a message quotes a namespace name.
+: A placeholder that falls inside a quoted string is escaped as a
+string value, wherever in the string it sits, so a format that builds
+JSON keeps producing JSON even when a message quotes a namespace name
+or carries a Windows path.
 
 `--once`
 

@@ -141,11 +141,14 @@ func TestLogFormatEscapesAQuotedFieldsValue(t *testing.T) {
 	}
 }
 
-// Escaping belongs to the quotes the format wrote, not to the message. A field
-// the format did not put in quotes is written through verbatim, which is what
-// keeps a plain text line reading like one.
-func TestLogFormatEscapesOnlyWhatTheFormatQuoted(t *testing.T) {
+// Escaping follows the quotes the format itself wrote: a field that falls
+// inside an open string is escaped so it stays inside it, and a field outside
+// one is written through, which is what keeps a plain text line reading like
+// one. Where the field sits within the string does not matter — only that it is
+// in one.
+func TestLogFormatEscapesWhatFallsInsideAString(t *testing.T) {
 	const message = `namespace "default" \ here`
+	const escaped = `namespace \"default\" \\ here`
 
 	tests := []struct {
 		name   string
@@ -153,24 +156,44 @@ func TestLogFormatEscapesOnlyWhatTheFormatQuoted(t *testing.T) {
 		want   string
 	}{
 		{
-			name:   "the default format quotes nothing",
+			name:   "the default format opens no string",
 			format: defaultLogFormat,
-			want:   `2026-08-24 13:56:40 ERROR: namespace "default" \ here`,
+			want:   `2026-08-24 13:56:40 ERROR: ` + message,
 		},
 		{
-			name:   "an opening quote alone is not a quoted field",
-			format: `msg="%(message)s`,
-			want:   `msg="namespace "default" \ here`,
-		},
-		{
-			name:   "a closing quote alone is not either",
-			format: `msg=%(message)s"`,
-			want:   `msg=namespace "default" \ here"`,
-		},
-		{
-			name:   "a quote on both sides is",
+			name:   "a field inside a string is escaped",
 			format: `msg="%(message)s"`,
-			want:   `msg="namespace \"default\" \\ here"`,
+			want:   `msg="` + escaped + `"`,
+		},
+		{
+			// The field does not have to touch the quotes to be inside them.
+			// Rendering it raw here would end the string early.
+			name:   "a field further inside a string is escaped too",
+			format: `{"msg":"deleting %(message)s now"}`,
+			want:   `{"msg":"deleting ` + escaped + ` now"}`,
+		},
+		{
+			// Both fields sit in one string, though the text between them is
+			// neither preceded nor followed by a quote.
+			name:   "every field in one string is escaped",
+			format: `{"msg":"%(levelname)s %(message)s"}`,
+			want:   `{"msg":"ERROR ` + escaped + `"}`,
+		},
+		{
+			name:   "an unterminated string still holds the field",
+			format: `msg="%(message)s`,
+			want:   `msg="` + escaped,
+		},
+		{
+			name:   "a field after the string closed is written through",
+			format: `{"a":"x"} %(message)s`,
+			want:   `{"a":"x"} ` + message,
+		},
+		{
+			// A quote the format escaped does not open a string.
+			name:   "an escaped quote opens nothing",
+			format: `he said \" %(message)s`,
+			want:   `he said \" ` + message,
 		},
 	}
 
@@ -183,6 +206,40 @@ func TestLogFormatEscapesOnlyWhatTheFormatQuoted(t *testing.T) {
 
 			if got := format.render(levelError, message, at); got != tt.want {
 				t.Errorf("render() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The README promises that a format building JSON keeps producing JSON. That
+// has to hold for a format an operator wrote, not only for the one the README
+// prints, so these are JSON formats that place their fields differently.
+func TestLogFormatKeepsAnyJSONFormatParseable(t *testing.T) {
+	message := "listing pods in namespace \"default\": C:\\temp\\report\nfailed"
+
+	formats := []string{
+		documentedJSONFormat,
+		`{"msg":"prefix %(message)s"}`,
+		`{"msg":"%(message)s suffix"}`,
+		`{"msg":"%(levelname)s %(message)s"}`,
+		`{"level":"%(levelname)s","msg":"deleting %(message)s now"}`,
+	}
+
+	for _, f := range formats {
+		t.Run(f, func(t *testing.T) {
+			format, err := parseLogFormat(f)
+			if err != nil {
+				t.Fatalf("parseLogFormat returned %v", err)
+			}
+
+			line := format.render(levelError, message, at)
+
+			var got map[string]string
+			if err := json.Unmarshal([]byte(line), &got); err != nil {
+				t.Fatalf("the rendered line is not JSON: %v\nline: %s", err, line)
+			}
+			if !strings.Contains(got["msg"], message) {
+				t.Errorf("msg = %q, want it to carry the message unchanged: %q", got["msg"], message)
 			}
 		})
 	}
