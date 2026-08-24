@@ -76,9 +76,8 @@ type logFormat struct {
 }
 
 // placeholder is one gap a format leaves: the field that fills it, and whether
-// the format put that field between two double quotes. A quoted field is a
-// string in whatever the format is building, so its value is escaped rather
-// than written through.
+// it falls inside a quoted string. A quoted field is a string in whatever the
+// format is building, so its value is escaped rather than written through.
 type placeholder struct {
 	field  logField
 	quoted bool
@@ -90,6 +89,7 @@ type placeholder struct {
 func parseLogFormat(format string) (logFormat, error) {
 	var f logFormat
 	var literal strings.Builder
+	var quotes quoteScanner
 
 	for i := 0; i < len(format); {
 		// %% is a literal percent, as it is in the Python format this syntax
@@ -102,6 +102,7 @@ func parseLogFormat(format string) (logFormat, error) {
 
 		if !strings.HasPrefix(format[i:], "%(") {
 			literal.WriteByte(format[i])
+			quotes.read(format[i])
 			i++
 			continue
 		}
@@ -124,27 +125,38 @@ func parseLogFormat(format string) (logFormat, error) {
 
 		f.literals = append(f.literals, literal.String())
 		literal.Reset()
-		f.placeholders = append(f.placeholders, placeholder{field: field})
+		f.placeholders = append(f.placeholders, placeholder{field: field, quoted: quotes.inString})
 		i += end + 2
 	}
 
 	f.literals = append(f.literals, literal.String())
-	f.markQuotedPlaceholders()
 	return f, nil
 }
 
-// markQuotedPlaceholders works out which fields the format wrapped in quotes.
-// It can only be decided once the whole format is compiled, because a field is
-// quoted by the literal after it as much as by the literal before it.
+// quoteScanner tracks whether the format's own text has an open double quote at
+// the point it has read up to. A placeholder reached with one open sits inside
+// a string, whatever the format is building — a JSON value, a logfmt value, or
+// a quoted name in a plain line — and its value has to be escaped to stay
+// inside it.
 //
 // Keying on the quotes rather than on the shape as a whole is what lets one
-// rule serve JSON and the logfmt-style formats alike. It is deliberately the
-// only structure this reads out of a format: a second such inference would
-// mean the format should name its shape instead of implying it.
-func (f *logFormat) markQuotedPlaceholders() {
-	for i := range f.placeholders {
-		f.placeholders[i].quoted = strings.HasSuffix(f.literals[i], `"`) &&
-			strings.HasPrefix(f.literals[i+1], `"`)
+// rule serve JSON and logfmt alike. It is deliberately the only structure this
+// reads out of a format: a second such inference would mean the format should
+// name its shape rather than imply it.
+type quoteScanner struct {
+	inString bool
+	escaped  bool
+}
+
+// read takes the next byte of the format's literal text.
+func (q *quoteScanner) read(c byte) {
+	switch {
+	case q.escaped:
+		q.escaped = false
+	case c == '\\':
+		q.escaped = true
+	case c == '"':
+		q.inString = !q.inString
 	}
 }
 
