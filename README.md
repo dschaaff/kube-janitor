@@ -112,15 +112,21 @@ Available command line options:
 
 `--debug`
 
-: Debug mode: print more information
+: Debug mode: also log `DEBUG` lines.
 
 `--quiet`
 
-: Quiet mode: Hides cleanup logs but keeps deletion logs
+: Quiet mode: log only `WARNING` and `ERROR` lines, so a run reports
+what went wrong and nothing else.
 
 `--log-format`
 
-: Set custom log format for structured logging output.
+: Set the format of each log line (default:
+`%(asctime)s %(levelname)s: %(message)s`). The placeholders are
+`%(asctime)s` (local time), `%(created)s` (Unix timestamp),
+`%(levelname)s` (`DEBUG`, `INFO`, `WARNING` or `ERROR`), `%(name)s`
+(`kube-janitor`) and `%(message)s`. Write `%%` for a literal percent
+sign. A format naming any other placeholder is refused at startup.
 
 `--once`
 
@@ -187,13 +193,14 @@ you want the resources to not be cleaned up if they\'ve been
 recently redeployed, and your deployment tooling can set this
 annotation.
 
-`--resource-context-hook`
+`RESOURCE_CONTEXT_HOOK`
 
-: Optional: string pointing to a Go function to populate the
-`_context` object with additional information, e.g. by calling
-external services. Built-in example to set `_context.random_dice` to
-a random dice value (1-6):
-`--resource-context-hook=hooks.RandomDice`.
+: Optional: environment variable naming a built-in hook that
+populates the `_context` object with additional information, e.g. by
+calling external services. The one built-in hook is `random_dice`,
+which sets `_context.random_dice` to a random dice value (1-6):
+`RESOURCE_CONTEXT_HOOK=random_dice`. A name that matches no hook is
+refused at startup.
 
 `--include-cluster-resources`
 
