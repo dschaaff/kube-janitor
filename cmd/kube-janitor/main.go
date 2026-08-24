@@ -3,7 +3,7 @@ package main
 import (
 	"errors"
 	"flag"
-	"log"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -21,14 +21,17 @@ var (
 func main() {
 	// The configuration decides how a log line is formatted, so nothing is
 	// logged in the janitor's own format until it has loaded. A configuration
-	// that will not load is reported through the standard logger and is the one
-	// message a run can emit in another shape.
+	// that will not load is reported plainly, once, and is the one message a
+	// run can emit in another shape.
 	config, err := janitor.LoadConfig(os.Args[1:], os.Getenv)
 	if err != nil {
 		if errors.Is(err, flag.ErrHelp) {
+			janitor.Usage(os.Stdout, os.Getenv)
 			return
 		}
-		log.Fatalf("Invalid configuration: %v", err)
+		fmt.Fprintf(os.Stderr, "kube-janitor: %v\n", err)
+		fmt.Fprintln(os.Stderr, "Run kube-janitor -help for the options a run accepts.")
+		os.Exit(1)
 	}
 
 	logger := janitor.NewLogger(config, os.Stderr)

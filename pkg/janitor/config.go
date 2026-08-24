@@ -3,6 +3,7 @@ package janitor
 import (
 	"flag"
 	"fmt"
+	"io"
 	"slices"
 	"strings"
 
@@ -69,13 +70,16 @@ func newConfig() *Config {
 // resource context hook its settings name. It returns flag.ErrHelp when the
 // arguments asked for usage, which a caller reports as success rather than as a
 // bad configuration.
+//
+// Every failure comes back as an error and nothing is written anywhere, so the
+// caller reports the trouble once, in the place it chooses. Whatever the
+// environment holds, arguments that only asked for usage get usage.
 func LoadConfig(args []string, env func(string) string) (*Config, error) {
 	c := newConfig()
-	if err := c.applyEnv(env); err != nil {
-		return nil, err
-	}
+	c.applyEnv(env)
 
 	fs := flag.NewFlagSet("kube-janitor", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
 	c.addFlags(fs)
 
 	if err := fs.Parse(args); err != nil {
@@ -86,6 +90,10 @@ func LoadConfig(args []string, env func(string) string) (*Config, error) {
 		return nil, err
 	}
 
+	if err := c.resolveHook(env("RESOURCE_CONTEXT_HOOK")); err != nil {
+		return nil, err
+	}
+
 	if err := c.loadRules(); err != nil {
 		return nil, err
 	}
@@ -93,12 +101,30 @@ func LoadConfig(args []string, env func(string) string) (*Config, error) {
 	return c, nil
 }
 
+// Usage writes the options a run accepts to w, each with the default it would
+// take from this environment. Asking for usage is not a failure, so a caller
+// puts it where its output goes rather than where its errors do.
+func Usage(w io.Writer, env func(string) string) {
+	c := newConfig()
+	c.applyEnv(env)
+
+	fs := flag.NewFlagSet("kube-janitor", flag.ContinueOnError)
+	fs.SetOutput(w)
+	c.addFlags(fs)
+
+	fs.Usage()
+}
+
 // applyEnv folds the environment into the defaults before the flags are
 // registered, so every flag's default is the value the run would use had the
 // flag been left out — which is also what usage prints. A variable that is
 // unset or empty leaves the default alone, which is how a container image
 // unsets one it inherited.
-func (c *Config) applyEnv(env func(string) string) error {
+//
+// Nothing here can fail: it only decides what a flag's default is. The settings
+// the environment names that could be wrong are resolved after the arguments
+// are parsed, so a run that only asked for usage still gets it.
+func (c *Config) applyEnv(env func(string) string) {
 	list := func(key string, target *[]string) {
 		if value := env(key); value != "" {
 			*target = splitList(value)
@@ -113,15 +139,22 @@ func (c *Config) applyEnv(env func(string) string) error {
 	if value := env("RULES_FILE"); value != "" {
 		c.RulesFile = value
 	}
+}
 
-	if name := env("RESOURCE_CONTEXT_HOOK"); name != "" {
-		hook, err := hooks.GetHook(name)
-		if err != nil {
-			return fmt.Errorf("failed to get hook: %v", err)
-		}
-		c.ResourceContextHook = ResourceContextHook(hook)
+// resolveHook looks up the resource context hook the environment named, so that
+// a run is handed the hook it asked for and a name that names nothing is
+// refused before the first Listing rather than at the first Target.
+func (c *Config) resolveHook(name string) error {
+	if name == "" {
+		return nil
 	}
 
+	hook, err := hooks.GetHook(name)
+	if err != nil {
+		return fmt.Errorf("failed to get resource context hook: %w", err)
+	}
+
+	c.ResourceContextHook = ResourceContextHook(hook)
 	return nil
 }
 
@@ -207,7 +240,7 @@ func (c *Config) loadRules() error {
 
 	rules, err := LoadRules(c.RulesFile)
 	if err != nil {
-		return fmt.Errorf("failed to load rules: %v", err)
+		return fmt.Errorf("failed to load rules: %w", err)
 	}
 
 	c.Rules = rules
