@@ -2,6 +2,7 @@ package janitor
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -21,10 +22,14 @@ import (
 // discovery reports, the namespaces the cluster holds, and the resources in them.
 // A namespace a run may judge has to be named in namespaces and supplied as an
 // object, the way a real cluster serves it to both clients.
+//
+// out is where the run's log lines go. A case that does not care leaves it nil
+// and the lines are dropped.
 type clusterFixture struct {
 	types      []ResourceType
 	namespaces []string
 	objects    []*unstructured.Unstructured
+	out        io.Writer
 }
 
 // newRunFixture is a Janitor handed fake connections holding the fixture. Because
@@ -60,7 +65,13 @@ func newRunFixture(t *testing.T, cfg *Config, f clusterFixture) *Janitor {
 		listed = append(listed, o)
 	}
 
-	return New(cfg, Cluster{Typed: typed, Dynamic: dynamicClientFor(f.types, listed...)})
+	out := f.out
+	if out == nil {
+		out = io.Discard
+	}
+
+	return New(cfg, Cluster{Typed: typed, Dynamic: dynamicClientFor(f.types, listed...)},
+		NewLogger(cfg, out))
 }
 
 // events reports the Kubernetes events a run recorded, in order. Counting them is
