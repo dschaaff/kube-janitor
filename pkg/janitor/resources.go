@@ -2,6 +2,7 @@ package janitor
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -44,7 +45,7 @@ func GetResourceTypes(client kubernetes.Interface) ([]ResourceType, error) {
 	}
 
 	for _, r := range resources.APIResources {
-		if strings.Contains(r.Name, "/") || !stringInSlice("delete", r.Verbs) {
+		if strings.Contains(r.Name, "/") || !slices.Contains(r.Verbs, "delete") {
 			continue
 		}
 
@@ -72,7 +73,7 @@ func GetResourceTypes(client kubernetes.Interface) ([]ResourceType, error) {
 		}
 
 		for _, r := range resources.APIResources {
-			if strings.Contains(r.Name, "/") || !stringInSlice("delete", r.Verbs) {
+			if strings.Contains(r.Name, "/") || !slices.Contains(r.Verbs, "delete") {
 				continue
 			}
 
@@ -105,13 +106,4 @@ func filterDeprecatedAPIs(resourceTypesMap map[string]ResourceType) {
 	if _, hasEndpointSlices := resourceTypesMap["discovery.k8s.io/v1/endpointslices"]; hasEndpointSlices {
 		delete(resourceTypesMap, "v1/endpoints")
 	}
-}
-
-func stringInSlice(str string, slice []string) bool {
-	for _, s := range slice {
-		if s == str {
-			return true
-		}
-	}
-	return false
 }
