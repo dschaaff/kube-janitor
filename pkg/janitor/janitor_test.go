@@ -14,74 +14,136 @@ import (
 	fakediscovery "k8s.io/client-go/discovery/fake"
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 )
 
-// newRunFixture is a Janitor handed fake connections holding the given resources,
-// the namespaces they live in, and the discovery a run needs to find them. Because
-// New accepts a Cluster, a whole run goes through the interface main uses.
-func newRunFixture(t *testing.T, cfg *Config, rt ResourceType, objects ...*unstructured.Unstructured) *Janitor {
-	t.Helper()
-
-	listed := make([]runtime.Object, 0, len(objects))
-	var namespaces []runtime.Object
-	seen := map[string]bool{}
-
-	for _, o := range objects {
-		listed = append(listed, o)
-
-		ns := o.GetNamespace()
-		if !seen[ns] {
-			seen[ns] = true
-			namespaces = append(namespaces,
-				&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}})
-		}
-	}
-
-	typed := fake.NewSimpleClientset(namespaces...)
-	typed.Discovery().(*fakediscovery.FakeDiscovery).Resources = discoveryFor(rt)
-
-	return New(cfg, Cluster{Typed: typed, Dynamic: dynamicClientFor(rt, listed...)})
+// clusterFixture describes the cluster one run works against: the Resource types
+// discovery reports, the namespaces the cluster holds, and the resources in them.
+// A namespace a run may judge has to be named in namespaces and supplied as an
+// object, the way a real cluster serves it to both clients.
+type clusterFixture struct {
+	types      []ResourceType
+	namespaces []string
+	objects    []*unstructured.Unstructured
 }
 
-// discoveryFor reports the given type. Discovery returns the first list matching
-// a group version, so the trailing core-group entry only answers the "v1" lookup
-// GetResourceTypes always makes first, and is shadowed for a core-group type.
-func discoveryFor(rt ResourceType) []*metav1.APIResourceList {
-	return []*metav1.APIResourceList{
-		{GroupVersion: rt.apiVersion(), APIResources: []metav1.APIResource{{
+// newRunFixture is a Janitor handed fake connections holding the fixture. Because
+// New accepts a Cluster, a whole run goes through the interface main uses.
+func newRunFixture(t *testing.T, cfg *Config, f clusterFixture) *Janitor {
+	t.Helper()
+
+	seen := map[string]bool{}
+	var names []string
+	add := func(name string) {
+		if name != "" && !seen[name] {
+			seen[name] = true
+			names = append(names, name)
+		}
+	}
+	for _, name := range f.namespaces {
+		add(name)
+	}
+	for _, o := range f.objects {
+		add(o.GetNamespace())
+	}
+
+	held := make([]runtime.Object, 0, len(names))
+	for _, name := range names {
+		held = append(held, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: name}})
+	}
+
+	typed := fake.NewSimpleClientset(held...)
+	typed.Discovery().(*fakediscovery.FakeDiscovery).Resources = discoveryFor(f.types)
+
+	listed := make([]runtime.Object, 0, len(f.objects))
+	for _, o := range f.objects {
+		listed = append(listed, o)
+	}
+
+	return New(cfg, Cluster{Typed: typed, Dynamic: dynamicClientFor(f.types, listed...)})
+}
+
+// events reports the Kubernetes events a run recorded, in order. Counting them is
+// how a case shows a resource was acted on once rather than twice.
+func events(t *testing.T, j *Janitor) []*corev1.Event {
+	t.Helper()
+
+	var recorded []*corev1.Event
+	for _, action := range j.cluster.Typed.(*fake.Clientset).Actions() {
+		create, ok := action.(k8stesting.CreateAction)
+		if !ok || action.GetResource().Resource != "events" {
+			continue
+		}
+		event, ok := create.GetObject().(*corev1.Event)
+		if !ok {
+			t.Fatalf("created events resource is a %T, want an Event", create.GetObject())
+		}
+		recorded = append(recorded, event)
+	}
+	return recorded
+}
+
+// discoveryFor reports the given types, grouped the way a real API server groups
+// them. GetResourceTypes asks for the core group first, so a "v1" list is always
+// present even when no core-group type is fixtured.
+func discoveryFor(types []ResourceType) []*metav1.APIResourceList {
+	byGroupVersion := map[string]*metav1.APIResourceList{}
+	var order []string
+
+	for _, rt := range types {
+		groupVersion := rt.apiVersion()
+		list, ok := byGroupVersion[groupVersion]
+		if !ok {
+			list = &metav1.APIResourceList{GroupVersion: groupVersion}
+			byGroupVersion[groupVersion] = list
+			order = append(order, groupVersion)
+		}
+		list.APIResources = append(list.APIResources, metav1.APIResource{
 			Name:       rt.Plural,
 			Kind:       rt.Kind,
 			Namespaced: rt.Namespaced,
 			Verbs:      []string{"list", "delete"},
-		}}},
-		{GroupVersion: "v1"},
+		})
 	}
+
+	if _, ok := byGroupVersion["v1"]; !ok {
+		byGroupVersion["v1"] = &metav1.APIResourceList{GroupVersion: "v1"}
+		order = append(order, "v1")
+	}
+
+	lists := make([]*metav1.APIResourceList, 0, len(order))
+	for _, groupVersion := range order {
+		lists = append(lists, byGroupVersion[groupVersion])
+	}
+	return lists
 }
 
-// dynamicClientFor is a dynamic fake that knows how to list the given type.
-func dynamicClientFor(rt ResourceType, objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
-	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(
-		runtime.NewScheme(),
-		map[schema.GroupVersionResource]string{rt.gvr(): rt.Kind + "List"},
-		objects...,
-	)
+// dynamicClientFor is a dynamic fake that knows how to list the given types.
+func dynamicClientFor(types []ResourceType, objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
+	kinds := map[schema.GroupVersionResource]string{}
+	for _, rt := range types {
+		kinds[rt.gvr()] = rt.Kind + "List"
+	}
+
+	return dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(), kinds, objects...)
 }
 
-// expiredObject carries an expiry annotation in the past, so any run that
-// considers it deletes it.
+// expiringObject carries an expiry annotation at the given offset from now, so a
+// run judges it without any rule being configured. A negative offset has passed,
+// so the run deletes it; a positive one has not, so at most the run warns.
+func expiringObject(rt ResourceType, namespace, name string, in time.Duration) *unstructured.Unstructured {
+	object := resourceObject(rt, namespace, name)
+	metadata := object.Object["metadata"].(map[string]interface{})
+	metadata["creationTimestamp"] = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
+	metadata["annotations"] = map[string]interface{}{
+		ExpiryAnnotation: time.Now().Add(in).Format(time.RFC3339),
+	}
+	return object
+}
+
+// expiredObject is the common case: an expiry an hour past.
 func expiredObject(rt ResourceType, namespace, name string) *unstructured.Unstructured {
-	return &unstructured.Unstructured{Object: map[string]interface{}{
-		"kind":       rt.Kind,
-		"apiVersion": rt.apiVersion(),
-		"metadata": map[string]interface{}{
-			"name":              name,
-			"namespace":         namespace,
-			"creationTimestamp": time.Now().Add(-24 * time.Hour).Format(time.RFC3339),
-			"annotations": map[string]interface{}{
-				ExpiryAnnotation: time.Now().Add(-time.Hour).Format(time.RFC3339),
-			},
-		},
-	}}
+	return expiringObject(rt, namespace, name, -time.Hour)
 }
 
 // resourceExists reports whether the janitor's cluster still holds the resource.
@@ -157,7 +219,7 @@ func TestCleanUp(t *testing.T) {
 				pods = append(pods, expiredObject(podResourceType, namespace, name))
 			}
 
-			j := newRunFixture(t, cfg, podResourceType, pods...)
+			j := newRunFixture(t, cfg, clusterFixture{types: []ResourceType{podResourceType}, objects: pods})
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -192,7 +254,10 @@ func TestCleanUpDeletesAnIrregularlyPluralisedResource(t *testing.T) {
 	cfg := NewConfig()
 	cfg.IncludeResources = []string{"ingresses"}
 
-	j := newRunFixture(t, cfg, ingressResourceType, expiredObject(ingressResourceType, "staging", "web"))
+	j := newRunFixture(t, cfg, clusterFixture{
+		types:   []ResourceType{ingressResourceType},
+		objects: []*unstructured.Unstructured{expiredObject(ingressResourceType, "staging", "web")},
+	})
 
 	if err := j.CleanUp(context.Background()); err != nil {
 		t.Fatalf("CleanUp() error = %v", err)
@@ -200,5 +265,116 @@ func TestCleanUpDeletesAnIrregularlyPluralisedResource(t *testing.T) {
 
 	if resourceExists(t, j, ingressResourceType, "staging", "web") {
 		t.Error("ingress staging/web still exists, want it deleted")
+	}
+}
+
+// A namespace used to be reached twice in one run: once through the pass that
+// handled namespaces on their own, and once as a discovered cluster-scoped type.
+// A verdict that deletes hid it, because the first reach removed the resource
+// before the second listed it. A verdict that only warns did not: it recorded two
+// events and sent two notifications. The Selector yields one Listing per Resource
+// type, so there is no second reach to make.
+func TestCleanUpActsOnANamespaceOnce(t *testing.T) {
+	cfg := NewConfig()
+	cfg.IncludeClusterResources = true
+	cfg.DeleteNotification = int(time.Hour.Seconds())
+
+	j := newRunFixture(t, cfg, clusterFixture{
+		types:      []ResourceType{namespaceResourceType},
+		namespaces: []string{"pr-42"},
+		objects: []*unstructured.Unstructured{
+			expiringObject(namespaceResourceType, "", "pr-42", 30*time.Minute),
+		},
+	})
+
+	if err := j.CleanUp(context.Background()); err != nil {
+		t.Fatalf("CleanUp() error = %v", err)
+	}
+
+	recorded := events(t, j)
+	if len(recorded) != 1 {
+		t.Fatalf("recorded %d events, want 1", len(recorded))
+	}
+	if recorded[0].Reason != "DeleteNotification" {
+		t.Errorf("event reason = %q, want DeleteNotification", recorded[0].Reason)
+	}
+}
+
+// Namespaces are the one cluster-scoped type a run handles without
+// --include-cluster-resources: see the flag's entry in the README.
+func TestCleanUpDeletesANamespaceWithoutClusterResources(t *testing.T) {
+	cfg := NewConfig()
+
+	j := newRunFixture(t, cfg, clusterFixture{
+		types:      []ResourceType{namespaceResourceType},
+		namespaces: []string{"pr-42"},
+		objects: []*unstructured.Unstructured{
+			expiredObject(namespaceResourceType, "", "pr-42"),
+		},
+	})
+
+	if err := j.CleanUp(context.Background()); err != nil {
+		t.Fatalf("CleanUp() error = %v", err)
+	}
+
+	if resourceExists(t, j, namespaceResourceType, "", "pr-42") {
+		t.Error("namespace pr-42 still exists, want it deleted")
+	}
+}
+
+// A namespace is excluded by name, the same lists that exclude the resources
+// inside it.
+func TestCleanUpLeavesAnExcludedNamespaceAlone(t *testing.T) {
+	cfg := NewConfig()
+
+	j := newRunFixture(t, cfg, clusterFixture{
+		types:      []ResourceType{namespaceResourceType},
+		namespaces: []string{"pr-42", "kube-system"},
+		objects: []*unstructured.Unstructured{
+			expiredObject(namespaceResourceType, "", "pr-42"),
+			expiredObject(namespaceResourceType, "", "kube-system"),
+		},
+	})
+
+	if err := j.CleanUp(context.Background()); err != nil {
+		t.Fatalf("CleanUp() error = %v", err)
+	}
+
+	if resourceExists(t, j, namespaceResourceType, "", "pr-42") {
+		t.Error("namespace pr-42 still exists, want it deleted")
+	}
+	if !resourceExists(t, j, namespaceResourceType, "", "kube-system") {
+		t.Error("namespace kube-system was deleted, want it left alone")
+	}
+}
+
+// The plan is built from one read of the namespace list, however many Resource
+// types a run considers. It used to be read once per type, plus once more for
+// the pass that handled namespaces on their own.
+//
+// This counts the planning read only. A run that judges namespaces lists them
+// again through the dynamic client, because that is the path every resource it
+// judges arrives by.
+func TestCleanUpReadsTheNamespaceListOnceToPlan(t *testing.T) {
+	cfg := NewConfig()
+
+	j := newRunFixture(t, cfg, clusterFixture{
+		types:      []ResourceType{podResourceType, deploymentResourceType, ingressResourceType},
+		namespaces: []string{"staging", "prod"},
+	})
+
+	if err := j.CleanUp(context.Background()); err != nil {
+		t.Fatalf("CleanUp() error = %v", err)
+	}
+
+	lists := 0
+	for _, action := range j.cluster.Typed.(*fake.Clientset).Actions() {
+		if action.GetVerb() == "list" && action.GetResource().Resource == "namespaces" {
+			lists++
+		}
+	}
+
+	if lists != 1 {
+		t.Errorf("listed namespaces %d times, want 1", lists)
 	}
 }

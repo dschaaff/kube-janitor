@@ -31,6 +31,12 @@ listed and deleted through. A Target is built from the type it was listed as, so
 the plural is never derived from the kind.
 _Avoid_: Kind (one field of a Resource type), GVR, plural
 
+**Listing**:
+One list a run makes: every resource of a single Resource type, in one namespace,
+or across the cluster for a type that has no namespace. A run reaches a Target
+through exactly one Listing, which is what stops a resource being judged twice.
+_Avoid_: Query, scan, batch, page
+
 **Verdict**:
 The conclusion about one Target: leave it alone, delete it, or warn that it will be
 deleted. A Verdict carries the reason it was reached, so nothing downstream has to
@@ -73,7 +79,10 @@ _Avoid_: Execute, enact, perform, handle
 
 **Selector**:
 The module that decides which resources a run considers at all, from the
-configured resource and namespace include and exclude lists.
+configured resource and namespace include and exclude lists. It plans the run's
+Listings, naming each one once, and is the only thing that judges scope.
+Namespaces are the one kind it considers without cluster resources being
+included.
 _Avoid_: Filter, matcher, scope
 
 **Connect**:

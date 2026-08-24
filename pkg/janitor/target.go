@@ -1,11 +1,8 @@
 package janitor
 
 import (
-	"encoding/json"
-	"fmt"
 	"time"
 
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
@@ -30,58 +27,23 @@ type Target struct {
 }
 
 // newTarget builds a target from a resource the dynamic client listed and the
-// Resource type it was listed as. The type is the only source of the kind, API
-// version and GVR, so nothing downstream re-derives them and no plural is ever
-// guessed. The caller must pass the type it listed the resource under; nothing
-// here can check that.
+// Resource type it was listed as. Every resource a run considers arrives this
+// way, namespaces included. The type is the only source of the kind, API version
+// and GVR, so nothing downstream re-derives them and no plural is ever guessed.
+// The caller must pass the type it listed the resource under; nothing here can
+// check that.
 func newTarget(u *unstructured.Unstructured, rt ResourceType) Target {
-	t := targetOf(u, rt)
-	t.Raw = u.Object
-	return t
-}
-
-// newTypedTarget builds a target from a resource the typed client returned,
-// converting it to the raw form rules evaluate against. Only namespaces take
-// this path, and only the conversion can fail.
-func newTypedTarget(obj metav1.Object, rt ResourceType) (Target, error) {
-	raw, err := toMap(obj)
-	if err != nil {
-		return Target{}, err
-	}
-
-	t := targetOf(obj, rt)
-	t.Raw = raw
-	return t, nil
-}
-
-// targetOf fills in everything that does not depend on how the resource was
-// listed.
-func targetOf(obj metav1.Object, rt ResourceType) Target {
 	return Target{
 		Kind:        rt.Kind,
 		APIVersion:  rt.apiVersion(),
-		Namespace:   obj.GetNamespace(),
-		Name:        obj.GetName(),
-		UID:         obj.GetUID(),
-		Annotations: obj.GetAnnotations(),
-		CreatedAt:   obj.GetCreationTimestamp().Time,
+		Namespace:   u.GetNamespace(),
+		Name:        u.GetName(),
+		UID:         u.GetUID(),
+		Annotations: u.GetAnnotations(),
+		CreatedAt:   u.GetCreationTimestamp().Time,
 		GVR:         rt.gvr(),
+		Raw:         u.Object,
 	}
-}
-
-// toMap converts a Kubernetes object to a map for JMESPath evaluation.
-func toMap(obj metav1.Object) (map[string]interface{}, error) {
-	data, err := json.Marshal(obj)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal object: %v", err)
-	}
-
-	var result map[string]interface{}
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal object: %v", err)
-	}
-
-	return result, nil
 }
 
 // plural is the Resource type's plural: the name this target was listed under,

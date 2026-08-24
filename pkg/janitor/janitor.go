@@ -10,12 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// namespaceResourceType is the Resource type namespaces are listed and deleted
-// through. cleanupNamespaces lists them through the typed client rather than
-// from the discovered types, so it names the type here; the values are fixed by
-// the Kubernetes API.
-var namespaceResourceType = ResourceType{Version: "v1", Kind: "Namespace", Plural: "namespaces"}
-
 // Janitor handles the cleanup of Kubernetes resources
 type Janitor struct {
 	cluster Cluster
@@ -46,7 +40,10 @@ func (j *Janitor) infoLog(format string, args ...interface{}) {
 	}
 }
 
-// CleanUp performs one cleanup run
+// CleanUp performs one cleanup run.
+//
+// What the run considers is settled up front by the Selector, so the loop below
+// only lists and acts. Every resource is reached through exactly one Listing.
 func (j *Janitor) CleanUp(ctx context.Context) error {
 	j.debugLog("Starting cleanup run")
 
@@ -54,24 +51,34 @@ func (j *Janitor) CleanUp(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to get resource types: %v", err)
 	}
-
 	j.debugLog("Found %d resource types", len(resourceTypes))
+
+	namespaces, err := j.namespaceNames(ctx)
+	if err != nil {
+		return err
+	}
+	j.debugLog("Found %d namespaces", len(namespaces))
+
+	sel := newSelector(j.config)
+	listings := sel.listings(resourceTypes, namespaces)
+	j.debugLog("Considering %d listings", len(listings))
 
 	counter := make(map[string]int)
 
-	// First handle namespaces if included
-	j.debugLog("Processing namespaces")
-	if err := j.cleanupNamespaces(ctx, counter); err != nil {
-		return fmt.Errorf("failed to cleanup namespaces: %v", err)
-	}
+	for _, l := range listings {
+		if ctx.Err() != nil {
+			j.debugLog("Context cancelled, stopping the run")
+			break
+		}
 
-	// Then handle other resources
-	for _, resourceType := range resourceTypes {
-		j.debugLog("Processing resource type: %s", resourceType.Kind)
-		if err := j.cleanupResourceType(ctx, resourceType, counter); err != nil {
-			log.Printf("Error cleaning up resource type %s: %v", resourceType.Kind, err)
+		targets, err := j.listTargets(ctx, l)
+		if err != nil {
+			log.Printf("Error listing %s in namespace %q: %v", l.Type.Plural, l.Namespace, err)
 			continue
 		}
+		j.debugLog("Found %d %s in namespace %q", len(targets), l.Type.Plural, l.Namespace)
+
+		j.processTargets(ctx, sel, targets, counter)
 	}
 
 	j.logCleanupSummary(counter)
@@ -79,111 +86,27 @@ func (j *Janitor) CleanUp(ctx context.Context) error {
 	return nil
 }
 
-// cleanupResourceType handles cleanup for a specific resource type
-func (j *Janitor) cleanupResourceType(ctx context.Context, resourceType ResourceType, counter map[string]int) error {
-	// Skip if resource type is excluded
-	if !j.shouldProcessResourceType(resourceType) {
-		j.debugLog("Skipping excluded resource type: %s", resourceType.Kind)
-		return nil
-	}
-
-	j.debugLog("Getting namespaces for resource type: %s", resourceType.Kind)
-	// Get all namespaces
-	namespaces, err := j.cluster.Typed.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+// namespaceNames lists the namespaces the cluster holds. A run reads them once
+// to plan with, rather than once per Resource type, because the Selector needs
+// all of them before it can plan any listing.
+func (j *Janitor) namespaceNames(ctx context.Context) ([]string, error) {
+	list, err := j.cluster.Typed.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("failed to list namespaces: %v", err)
+		return nil, fmt.Errorf("failed to list namespaces: %v", err)
 	}
 
-	// Process namespaced resources
-	if resourceType.Namespaced {
-		j.debugLog("Processing namespaced resources for type: %s", resourceType.Kind)
-
-		// Collect all targets from all namespaces first
-		var allTargets []Target
-
-		for _, ns := range namespaces.Items {
-			// Skip excluded namespaces
-			if !j.shouldProcessNamespace(ns.Name) {
-				j.debugLog("Skipping excluded namespace: %s", ns.Name)
-				continue
-			}
-
-			j.debugLog("Listing resources of type %s in namespace %s", resourceType.Kind, ns.Name)
-			targets, err := j.listTargets(ctx, resourceType, ns.Name)
-			if err != nil {
-				log.Printf("Error listing %s in namespace %s: %v", resourceType.Plural, ns.Name, err)
-				continue
-			}
-			j.debugLog("Found %d resources of type %s in namespace %s", len(targets), resourceType.Kind, ns.Name)
-
-			allTargets = append(allTargets, targets...)
-		}
-
-		j.processTargets(ctx, allTargets, counter)
-
-	} else if j.config.IncludeClusterResources {
-		// Process cluster-scoped resources if enabled
-		j.debugLog("Processing cluster-scoped resources for type: %s", resourceType.Kind)
-		targets, err := j.listTargets(ctx, resourceType, "")
-		if err != nil {
-			return fmt.Errorf("failed to list cluster-scoped %s: %v", resourceType.Plural, err)
-		}
-		j.debugLog("Found %d cluster-scoped resources of type %s", len(targets), resourceType.Kind)
-
-		j.processTargets(ctx, targets, counter)
+	names := make([]string, 0, len(list.Items))
+	for i := range list.Items {
+		names = append(names, list.Items[i].Name)
 	}
 
-	return nil
+	return names, nil
 }
 
-// shouldProcessResourceType checks if a resource type should be processed
-func (j *Janitor) shouldProcessResourceType(resourceType ResourceType) bool {
-	// Skip if resource type is explicitly excluded
-	for _, excluded := range j.config.ExcludeResources {
-		if excluded == resourceType.Plural {
-			j.debugLog("Resource type %s is in exclude list", resourceType.Plural)
-			return false
-		}
-	}
-
-	// Check if resource type is included
-	for _, included := range j.config.IncludeResources {
-		if included == "all" || included == resourceType.Plural {
-			j.debugLog("Resource type %s is included for processing", resourceType.Plural)
-			return true
-		}
-	}
-
-	j.debugLog("Resource type %s is not included for processing", resourceType.Plural)
-	return false
-}
-
-// shouldProcessNamespace checks if a namespace should be processed
-func (j *Janitor) shouldProcessNamespace(namespace string) bool {
-	// Skip if namespace is explicitly excluded
-	for _, excluded := range j.config.ExcludeNamespaces {
-		if excluded == namespace {
-			j.debugLog("Namespace %s is in exclude list", namespace)
-			return false
-		}
-	}
-
-	// Check if namespace is included
-	for _, included := range j.config.IncludeNamespaces {
-		if included == "all" || included == namespace {
-			j.debugLog("Namespace %s is included for processing", namespace)
-			return true
-		}
-	}
-
-	j.debugLog("Namespace %s is not included for processing", namespace)
-	return false
-}
-
-// listTargets lists every resource of the given type as a Target carrying that
-// type, in one namespace or across the cluster when namespace is empty.
-func (j *Janitor) listTargets(ctx context.Context, resourceType ResourceType, namespace string) ([]Target, error) {
-	list, err := j.cluster.Dynamic.Resource(resourceType.gvr()).Namespace(namespace).
+// listTargets lists every resource the listing names as a Target carrying the
+// Resource type it was listed as.
+func (j *Janitor) listTargets(ctx context.Context, l listing) ([]Target, error) {
+	list, err := j.cluster.Dynamic.Resource(l.Type.gvr()).Namespace(l.Namespace).
 		List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, err
@@ -191,18 +114,33 @@ func (j *Janitor) listTargets(ctx context.Context, resourceType ResourceType, na
 
 	targets := make([]Target, 0, len(list.Items))
 	for i := range list.Items {
-		targets = append(targets, newTarget(&list.Items[i], resourceType))
+		targets = append(targets, newTarget(&list.Items[i], l.Type))
 	}
 
 	return targets, nil
 }
 
-func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[string]int) error {
-	if !j.matchesResourceFilter(t) {
-		j.debugLog("Resource %s does not match filters, skipping", t.describe())
-		return nil
-	}
+// processTargets processes targets one by one in serial order, skipping those the
+// Selector does not admit.
+func (j *Janitor) processTargets(ctx context.Context, sel *selector, targets []Target, counter map[string]int) {
+	for _, t := range targets {
+		if ctx.Err() != nil {
+			j.debugLog("Context cancelled, stopping resource processing")
+			return
+		}
 
+		if !sel.admits(t) {
+			j.debugLog("Resource %s is not considered by this run, skipping", t.describe())
+			continue
+		}
+
+		if err := j.handleResource(ctx, t, counter); err != nil {
+			log.Printf("Error handling %s: %v", t.describe(), err)
+		}
+	}
+}
+
+func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[string]int) error {
 	counter["resources-processed"]++
 
 	now := time.Now()
@@ -244,75 +182,6 @@ func (j *Janitor) resourceContext(ctx context.Context, t Target) map[string]inte
 	return data
 }
 
-func (j *Janitor) cleanupNamespaces(ctx context.Context, counter map[string]int) error {
-	if !stringInSlice("namespaces", j.config.IncludeResources) &&
-		!stringInSlice("all", j.config.IncludeResources) {
-		j.debugLog("Namespaces not included in resources to process, skipping")
-		return nil
-	}
-
-	j.debugLog("Listing all namespaces")
-	namespaces, err := j.cluster.Typed.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to list namespaces: %v", err)
-	}
-	j.debugLog("Found %d namespaces", len(namespaces.Items))
-
-	// handleResource applies the same filter to every target, so there is no
-	// second pass here.
-	candidates := make([]Target, 0, len(namespaces.Items))
-	for i := range namespaces.Items {
-		// A namespace that will not convert is skipped rather than failing the
-		// run, the same way an unreadable resource context is.
-		t, err := newTypedTarget(&namespaces.Items[i], namespaceResourceType)
-		if err != nil {
-			log.Printf("Error reading namespace %s: %v", namespaces.Items[i].Name, err)
-			continue
-		}
-		candidates = append(candidates, t)
-	}
-
-	j.processTargets(ctx, candidates, counter)
-
-	return nil
-}
-
-// processTargets processes targets one by one in serial order
-func (j *Janitor) processTargets(ctx context.Context, targets []Target, counter map[string]int) {
-	if len(targets) == 0 {
-		return
-	}
-
-	j.debugLog("Processing %d resources serially", len(targets))
-
-	alreadySeen := make(map[string]bool)
-
-	for _, t := range targets {
-		// Check for context cancellation before processing each resource
-		select {
-		case <-ctx.Done():
-			j.debugLog("Context cancelled, stopping resource processing")
-			return
-		default:
-		}
-
-		key := t.describe()
-		if alreadySeen[key] {
-			j.debugLog("Skipping already processed resource: %s", key)
-			continue
-		}
-		alreadySeen[key] = true
-
-		j.debugLog("Processing resource: %s", key)
-
-		if err := j.handleResource(ctx, t, counter); err != nil {
-			log.Printf("Error handling %s: %v", key, err)
-		}
-	}
-
-	j.debugLog("Finished processing resources")
-}
-
 func (j *Janitor) logCleanupSummary(counter map[string]int) {
 	if j.config.Quiet {
 		return
@@ -331,72 +200,4 @@ func (j *Janitor) logCleanupSummary(counter map[string]int) {
 			j.debugLog("  %s: %d", k, v)
 		}
 	}
-}
-
-// matchesResourceFilter checks if a resource matches the configured filters
-func (j *Janitor) matchesResourceFilter(t Target) bool {
-	kind := t.Kind
-	name := t.Name
-
-	// A namespace is its own namespace for filtering purposes.
-	namespace := t.Namespace
-	if kind == "Namespace" {
-		namespace = name
-	}
-
-	resourceType := t.plural()
-
-	// Check if resource type is explicitly excluded
-	for _, excluded := range j.config.ExcludeResources {
-		if excluded == resourceType {
-			return false
-		}
-	}
-
-	// Check if resource type is included
-	resourceIncluded := false
-	for _, included := range j.config.IncludeResources {
-		if included == "all" || included == resourceType {
-			resourceIncluded = true
-			break
-		}
-	}
-
-	if !resourceIncluded {
-		return false
-	}
-
-	// Handle namespaces specially
-	if kind == "Namespace" {
-		for _, excluded := range j.config.ExcludeNamespaces {
-			if excluded == name {
-				return false
-			}
-		}
-		for _, included := range j.config.IncludeNamespaces {
-			if included == "all" || included == name {
-				return true
-			}
-		}
-		return false
-	}
-
-	// Handle cluster-scoped vs namespaced resources
-	if namespace == "" {
-		return j.config.IncludeClusterResources
-	}
-
-	// Check namespace filters
-	for _, excluded := range j.config.ExcludeNamespaces {
-		if excluded == namespace {
-			return false
-		}
-	}
-	for _, included := range j.config.IncludeNamespaces {
-		if included == "all" || included == namespace {
-			return true
-		}
-	}
-
-	return false
 }
