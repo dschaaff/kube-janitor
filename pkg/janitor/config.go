@@ -10,6 +10,10 @@ import (
 	"github.com/dschaaff/kube-janitor/pkg/janitor/hooks"
 )
 
+// programName is what the janitor calls itself in its usage text and its log
+// lines.
+const programName = "kube-janitor"
+
 const (
 	defaultInterval  = 30
 	defaultLogFormat = "%(asctime)s %(levelname)s: %(message)s"
@@ -75,12 +79,8 @@ func newConfig() *Config {
 // caller reports the trouble once, in the place it chooses. Whatever the
 // environment holds, arguments that only asked for usage get usage.
 func LoadConfig(args []string, env func(string) string) (*Config, error) {
-	c := newConfig()
-	c.applyEnv(env)
-
-	fs := flag.NewFlagSet("kube-janitor", flag.ContinueOnError)
+	c, fs := newFlagSet(env)
 	fs.SetOutput(io.Discard)
-	c.addFlags(fs)
 
 	if err := fs.Parse(args); err != nil {
 		return nil, err
@@ -105,14 +105,24 @@ func LoadConfig(args []string, env func(string) string) (*Config, error) {
 // take from this environment. Asking for usage is not a failure, so a caller
 // puts it where its output goes rather than where its errors do.
 func Usage(w io.Writer, env func(string) string) {
+	_, fs := newFlagSet(env)
+	fs.SetOutput(w)
+
+	fs.Usage()
+}
+
+// newFlagSet builds the flags a run is parsed from, over the defaults this
+// environment gives them. Loading a Configuration and printing the options both
+// go through it, so what usage says a run would do cannot drift from what it
+// does.
+func newFlagSet(env func(string) string) (*Config, *flag.FlagSet) {
 	c := newConfig()
 	c.applyEnv(env)
 
-	fs := flag.NewFlagSet("kube-janitor", flag.ContinueOnError)
-	fs.SetOutput(w)
+	fs := flag.NewFlagSet(programName, flag.ContinueOnError)
 	c.addFlags(fs)
 
-	fs.Usage()
+	return c, fs
 }
 
 // applyEnv folds the environment into the defaults before the flags are
@@ -228,6 +238,20 @@ func (c *Config) validate() error {
 	}
 
 	return nil
+}
+
+// lowestLogLevel works out the least a run reports. Asking for a diagnosis
+// beats asking for quiet: a run given both is being diagnosed, and a diagnosis
+// that left out the ordinary course of the run would be a poor one.
+func (c *Config) lowestLogLevel() logLevel {
+	switch {
+	case c.Debug:
+		return levelDebug
+	case c.Quiet:
+		return levelWarning
+	default:
+		return levelInfo
+	}
 }
 
 // loadRules reads the rules file, if one was named. A file that cannot be read

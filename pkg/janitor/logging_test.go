@@ -11,6 +11,10 @@ import (
 // case can state the whole line it expects.
 var at = time.Date(2026, 8, 24, 13, 56, 40, 500_000_000, time.UTC)
 
+// documentedJSONFormat is the JSON log format the README offers, written once
+// so that the cases below cannot pin different versions of it.
+const documentedJSONFormat = `{"level":"%(levelname)s","ts":"%(created)s","logger":"%(name)s","msg":"%(message)s"}`
+
 func TestLogFormatRenders(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -91,9 +95,7 @@ func TestLogFormatRenders(t *testing.T) {
 // The README offers a JSON log format, so one has to come out as parseable JSON
 // rather than as a line that merely looks like it.
 func TestLogFormatRendersTheDocumentedJSONExample(t *testing.T) {
-	const documented = `{"level":"%(levelname)s","ts":"%(created)s","logger":"%(name)s","msg":"%(message)s"}`
-
-	format, err := parseLogFormat(documented)
+	format, err := parseLogFormat(documentedJSONFormat)
 	if err != nil {
 		t.Fatalf("parseLogFormat returned %v for the format the README documents", err)
 	}
@@ -122,9 +124,7 @@ func TestLogFormatRendersTheDocumentedJSONExample(t *testing.T) {
 // the name, so the JSON the README offers has to survive a message that carries
 // quotes of its own. This is the message a failed listing actually produces.
 func TestLogFormatEscapesAQuotedFieldsValue(t *testing.T) {
-	const documented = `{"level":"%(levelname)s","ts":"%(created)s","logger":"%(name)s","msg":"%(message)s"}`
-
-	format, err := parseLogFormat(documented)
+	format, err := parseLogFormat(documentedJSONFormat)
 	if err != nil {
 		t.Fatalf("parseLogFormat returned %v", err)
 	}

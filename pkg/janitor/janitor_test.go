@@ -257,6 +257,32 @@ func TestCleanUp(t *testing.T) {
 	}
 }
 
+// A run reports what it did through the Logger it was handed, so a process that
+// builds one Logger sees the whole of its own output. Nothing in the janitor
+// reaches for standard error on its own.
+func TestCleanUpReportsThroughTheLoggerItWasGiven(t *testing.T) {
+	var said strings.Builder
+
+	cfg := newConfig()
+	cfg.LogFormat = "%(levelname)s %(message)s"
+
+	j := newRunFixture(t, cfg, clusterFixture{
+		types:   []ResourceType{podResourceType},
+		objects: []*unstructured.Unstructured{expiredObject(podResourceType, "staging", "web")},
+		out:     &said,
+	})
+
+	if err := j.CleanUp(context.Background()); err != nil {
+		t.Fatalf("CleanUp() error = %v", err)
+	}
+
+	for _, want := range []string{"INFO Pod staging/web", "INFO Clean up run completed", "pods-deleted=1"} {
+		if !strings.Contains(said.String(), want) {
+			t.Errorf("the run never said %q. It said:\n%s", want, said.String())
+		}
+	}
+}
+
 // A resource whose plural is not its kind plus "s" has to survive discovery,
 // filtering, rule matching and deletion with that plural intact. Guessing it
 // produced "ingresss", which the include list rejected and the API server would

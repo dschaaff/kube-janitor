@@ -100,6 +100,13 @@ Namespaces are the one kind it considers without cluster resources being
 included.
 _Avoid_: Filter, matcher, scope
 
+**Report**:
+The module that writes Log lines. It is handed the shape and the lowest level
+the Configuration settled on, and is the only thing that decides whether a line
+is written; a run is handed one and never builds its own, so everything one
+process says goes out through the same place.
+_Avoid_: Logger (the name of the thing, not of the module), output, printer
+
 **Connect**:
 The module that resolves the ambient credentials and returns the Cluster they
 grant. A run is handed a Cluster and never builds one, so the whole of a run can

@@ -107,7 +107,8 @@ func TestGetPVCContext(t *testing.T) {
 			clientset := fake.NewSimpleClientset()
 
 			// Create janitor instance with fake client
-			j := New(&Config{}, Cluster{Typed: clientset}, NewLogger(&Config{}, io.Discard))
+			cfg := &Config{}
+			j := New(cfg, Cluster{Typed: clientset}, NewLogger(cfg, io.Discard))
 
 			// Create test resources in fake client
 			if tt.pvc != nil {
