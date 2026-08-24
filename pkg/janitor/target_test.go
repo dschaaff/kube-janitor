@@ -4,9 +4,9 @@ import (
 	"testing"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -26,10 +26,36 @@ var (
 		Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy",
 		Plural: "networkpolicies", Namespaced: true,
 	}
+	// namespaceResourceType is how discovery reports namespaces: cluster-scoped,
+	// and listed through the "namespaces" plural.
+	namespaceResourceType = ResourceType{
+		Version: "v1", Kind: "Namespace", Plural: "namespaces",
+	}
+	// persistentVolumeResourceType is a cluster-scoped type with no standing of
+	// its own, so it is the one --include-cluster-resources gates.
+	persistentVolumeResourceType = ResourceType{
+		Version: "v1", Kind: "PersistentVolume", Plural: "persistentvolumes",
+	}
 )
 
-// mustTarget builds a Target for tests that drive the functions behind it,
-// taking either form a resource arrives in.
+// resourceObject is the unstructured form a resource arrives in. A cluster-scoped
+// one carries no namespace.
+func resourceObject(rt ResourceType, namespace, name string) *unstructured.Unstructured {
+	metadata := map[string]interface{}{"name": name}
+	if namespace != "" {
+		metadata["namespace"] = namespace
+	}
+
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"kind":       rt.Kind,
+		"apiVersion": rt.apiVersion(),
+		"metadata":   metadata,
+	}}
+}
+
+// mustTarget builds a Target the way a run does, from the unstructured form the
+// dynamic client returns. A fixture written as a typed object is converted
+// first, because that is the only form newTarget takes.
 func mustTarget(t *testing.T, obj metav1.Object, rt ResourceType) Target {
 	t.Helper()
 
@@ -37,11 +63,17 @@ func mustTarget(t *testing.T, obj metav1.Object, rt ResourceType) Target {
 		return newTarget(u, rt)
 	}
 
-	target, err := newTypedTarget(obj, rt)
-	if err != nil {
-		t.Fatalf("newTypedTarget() error = %v", err)
+	typed, ok := obj.(runtime.Object)
+	if !ok {
+		t.Fatalf("fixture %T is neither unstructured nor a runtime.Object", obj)
 	}
-	return target
+
+	raw, err := runtime.DefaultUnstructuredConverter.ToUnstructured(typed)
+	if err != nil {
+		t.Fatalf("converting %T: %v", obj, err)
+	}
+
+	return newTarget(&unstructured.Unstructured{Object: raw}, rt)
 }
 
 func TestNewTargetFromUnstructured(t *testing.T) {
@@ -92,12 +124,11 @@ func TestNewTargetFromUnstructured(t *testing.T) {
 	}
 }
 
+// A namespace is cluster-scoped: its own name is what identifies it, and it
+// carries no namespace of its own.
 func TestNewTargetFromNamespace(t *testing.T) {
-	got := mustTarget(t, &corev1.Namespace{
-		ObjectMeta: metav1.ObjectMeta{Name: "pr-42"},
-	}, namespaceResourceType)
+	got := newTarget(resourceObject(namespaceResourceType, "", "pr-42"), namespaceResourceType)
 
-	// A namespace is its own name, and carries no namespace of its own.
 	if got.Kind != "Namespace" {
 		t.Errorf("Kind = %q, want Namespace", got.Kind)
 	}
@@ -113,10 +144,7 @@ func TestNewTargetFromNamespace(t *testing.T) {
 		t.Errorf("GVR = %v, want %v", got.GVR, wantGVR)
 	}
 
-	// Namespaces arrive as a typed object, so the raw form is built by round-trip.
-	if got.Raw == nil {
-		t.Fatal("Raw = nil, want the resource as a map")
-	}
+	// Rules evaluate JMESPath against the raw resource, so it must be carried.
 	metadata, ok := got.Raw["metadata"].(map[string]interface{})
 	if !ok {
 		t.Fatalf("Raw[metadata] = %T, want a map", got.Raw["metadata"])
@@ -195,9 +223,12 @@ func TestTargetWasNotified(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			target := mustTarget(t, &corev1.Namespace{
-				ObjectMeta: metav1.ObjectMeta{Name: "ns", Annotations: tt.annotations},
-			}, namespaceResourceType)
+			obj := resourceObject(namespaceResourceType, "", "ns")
+			if tt.annotations != nil {
+				metadata := obj.Object["metadata"].(map[string]interface{})
+				metadata["annotations"] = toStringMap(tt.annotations)
+			}
+			target := newTarget(obj, namespaceResourceType)
 
 			if got := target.wasNotified(); got != tt.want {
 				t.Errorf("wasNotified() = %v, want %v", got, tt.want)
@@ -207,8 +238,7 @@ func TestTargetWasNotified(t *testing.T) {
 }
 
 func TestTargetDescribe(t *testing.T) {
-	target := mustTarget(t,
-		&corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "pr-42"}}, namespaceResourceType)
+	target := newTarget(resourceObject(namespaceResourceType, "", "pr-42"), namespaceResourceType)
 
 	if got, want := target.describe(), "Namespace /pr-42"; got != want {
 		t.Errorf("describe() = %q, want %q", got, want)

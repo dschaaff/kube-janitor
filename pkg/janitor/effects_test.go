@@ -27,7 +27,7 @@ func newEffectsFixture(t *testing.T, cfg *Config) effectsFixture {
 	return effectsFixture{
 		janitor: New(cfg, Cluster{
 			Typed:   fake.NewSimpleClientset(),
-			Dynamic: dynamicClientFor(podResourceType, obj),
+			Dynamic: dynamicClientFor([]ResourceType{podResourceType}, obj),
 		}),
 		target: mustTarget(t, obj, podResourceType),
 	}
