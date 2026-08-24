@@ -118,6 +118,76 @@ func TestLogFormatRendersTheDocumentedJSONExample(t *testing.T) {
 	}
 }
 
+// A run says which namespace it was listing, and it says it with quotes around
+// the name, so the JSON the README offers has to survive a message that carries
+// quotes of its own. This is the message a failed listing actually produces.
+func TestLogFormatEscapesAQuotedFieldsValue(t *testing.T) {
+	const documented = `{"level":"%(levelname)s","ts":"%(created)s","logger":"%(name)s","msg":"%(message)s"}`
+
+	format, err := parseLogFormat(documented)
+	if err != nil {
+		t.Fatalf("parseLogFormat returned %v", err)
+	}
+
+	message := "Error listing pods in namespace \"default\": a \\, a\nnewline and a \x01"
+	line := format.render(levelError, message, at)
+
+	var got map[string]string
+	if err := json.Unmarshal([]byte(line), &got); err != nil {
+		t.Fatalf("the rendered line is not JSON: %v\nline: %s", err, line)
+	}
+	if got["msg"] != message {
+		t.Errorf("msg = %q, want the message unchanged: %q", got["msg"], message)
+	}
+}
+
+// Escaping belongs to the quotes the format wrote, not to the message. A field
+// the format did not put in quotes is written through verbatim, which is what
+// keeps a plain text line reading like one.
+func TestLogFormatEscapesOnlyWhatTheFormatQuoted(t *testing.T) {
+	const message = `namespace "default" \ here`
+
+	tests := []struct {
+		name   string
+		format string
+		want   string
+	}{
+		{
+			name:   "the default format quotes nothing",
+			format: defaultLogFormat,
+			want:   `2026-08-24 13:56:40 ERROR: namespace "default" \ here`,
+		},
+		{
+			name:   "an opening quote alone is not a quoted field",
+			format: `msg="%(message)s`,
+			want:   `msg="namespace "default" \ here`,
+		},
+		{
+			name:   "a closing quote alone is not either",
+			format: `msg=%(message)s"`,
+			want:   `msg=namespace "default" \ here"`,
+		},
+		{
+			name:   "a quote on both sides is",
+			format: `msg="%(message)s"`,
+			want:   `msg="namespace \"default\" \\ here"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			format, err := parseLogFormat(tt.format)
+			if err != nil {
+				t.Fatalf("parseLogFormat(%q) returned %v", tt.format, err)
+			}
+
+			if got := format.render(levelError, message, at); got != tt.want {
+				t.Errorf("render() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // A format that cannot be rendered is refused where it is written down, not
 // silently turned into blank lines at run time.
 func TestParseLogFormatRefusesAFormatItCannotRender(t *testing.T) {
