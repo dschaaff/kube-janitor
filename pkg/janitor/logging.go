@@ -76,6 +76,11 @@ type logFormat struct {
 	// then the text after the last one.
 	literals []string
 	fields   []logField
+
+	// quoted says, per field, whether the format puts it between two double
+	// quotes. Such a field is a string in whatever the format is building, so
+	// its value is escaped rather than written through.
+	quoted []bool
 }
 
 // parseLogFormat compiles a log format written in Python's logging syntax,
@@ -123,7 +128,19 @@ func parseLogFormat(format string) (logFormat, error) {
 	}
 
 	f.literals = append(f.literals, literal.String())
+	f.markQuotedFields()
 	return f, nil
+}
+
+// markQuotedFields works out which fields the format wrapped in quotes. It can
+// only be decided once the whole format is compiled, because a field is quoted
+// by the literal after it as much as by the literal before it.
+func (f *logFormat) markQuotedFields() {
+	f.quoted = make([]bool, len(f.fields))
+	for i := range f.fields {
+		f.quoted[i] = strings.HasSuffix(f.literals[i], `"`) &&
+			strings.HasPrefix(f.literals[i+1], `"`)
+	}
 }
 
 // knownLogFields names the placeholders a format may use, in a stable order so
@@ -169,11 +186,42 @@ func (f logFormat) render(level logLevel, message string, now time.Time) string 
 
 	for i, field := range f.fields {
 		line.WriteString(f.literals[i])
-		line.WriteString(rec.value(field))
+
+		if f.quoted[i] {
+			writeQuotedValue(&line, rec.value(field))
+		} else {
+			line.WriteString(rec.value(field))
+		}
 	}
 
 	line.WriteString(f.literals[len(f.literals)-1])
 	return line.String()
+}
+
+// writeQuotedValue writes value as the body of a quoted string, escaping the
+// characters that would otherwise end the string early or break the line in
+// two. A format that wraps a field in quotes is building JSON or something
+// shaped like it, and a message carrying a quote of its own — which one
+// naming a namespace does — would leave it unparseable.
+func writeQuotedValue(line *strings.Builder, value string) {
+	for _, r := range value {
+		switch {
+		case r == '"':
+			line.WriteString(`\"`)
+		case r == '\\':
+			line.WriteString(`\\`)
+		case r == '\n':
+			line.WriteString(`\n`)
+		case r == '\r':
+			line.WriteString(`\r`)
+		case r == '\t':
+			line.WriteString(`\t`)
+		case r < 0x20:
+			fmt.Fprintf(line, `\u%04x`, r)
+		default:
+			line.WriteRune(r)
+		}
+	}
 }
 
 // Logger writes one line per event, in the format the Configuration names.
