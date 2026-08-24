@@ -15,7 +15,7 @@ func TestLogFormatRenders(t *testing.T) {
 	tests := []struct {
 		name    string
 		format  string
-		level   string
+		level   logLevel
 		message string
 		want    string
 	}{
@@ -197,9 +197,11 @@ func TestLoggerWritesTheLevelsTheConfigAdmits(t *testing.T) {
 			want: []string{"WARNING", "ERROR"},
 		},
 		{
+			// Asking for both is asking for a diagnosis, and a diagnosis that
+			// left out the ordinary course of the run would be a poor one.
 			name: "a quiet run being diagnosed",
 			cfg:  &Config{Debug: true, Quiet: true},
-			want: []string{"DEBUG", "WARNING", "ERROR"},
+			want: []string{"DEBUG", "INFO", "WARNING", "ERROR"},
 		},
 	}
 

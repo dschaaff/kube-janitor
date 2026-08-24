@@ -70,8 +70,8 @@ _Avoid_: Client, clientset, connection pool
 **Log line**:
 One thing a run says it did, carrying a level — whether it is a diagnostic, the
 ordinary course of the run, something worked around, or something that could not
-be done. The Configuration names the shape a line is written in and the levels
-worth writing; nothing that emits one decides whether it is wanted.
+be done. The Configuration names the shape a line is written in and the lowest
+level worth writing; nothing that emits one decides whether it is wanted.
 _Avoid_: Message (a Notification's wording is a message; a Log line is not),
 output, trace
 
