@@ -67,6 +67,14 @@ Resource context and events need, and the dynamic client for the arbitrary kinds
 a run lists and deletes. Both are resolved from one set of credentials.
 _Avoid_: Client, clientset, connection pool
 
+**Log line**:
+One thing a run says it did, carrying a level — whether it is a diagnostic, the
+ordinary course of the run, something worked around, or something that could not
+be done. The Configuration names the shape a line is written in and the levels
+worth writing; nothing that emits one decides whether it is wanted.
+_Avoid_: Message (a Notification's wording is a message; a Log line is not),
+output, trace
+
 **Notification**:
 A warning that a Target is about to be deleted, sent ahead of its Deadline.
 _Avoid_: Alert, message, event (a Notification may be recorded as a Kubernetes

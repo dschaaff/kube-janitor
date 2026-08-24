@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"time"
@@ -37,8 +36,8 @@ func (j *Janitor) Apply(ctx context.Context, t Target, v Verdict, now time.Time)
 // notify warns that a target is about to be deleted.
 func (j *Janitor) notify(ctx context.Context, t Target, v Verdict, now time.Time) error {
 	if j.config.DryRun {
-		log.Printf("**DRY-RUN**: Would send delete notification for %s", t.describe())
-		j.debugLog("Notification: %s", v.Message)
+		j.log.Infof("**DRY-RUN**: Would send delete notification for %s", t.describe())
+		j.log.Debugf("Notification: %s", v.Message)
 		return nil
 	}
 
@@ -52,7 +51,7 @@ func (j *Janitor) notify(ctx context.Context, t Target, v Verdict, now time.Time
 	}
 
 	if err := SendWebhookNotification(message); err != nil {
-		log.Printf("Failed to send webhook notification: %v", err)
+		j.log.Warnf("Failed to send webhook notification: %v", err)
 	}
 
 	// Flags the target as notified for the rest of this run only. Nothing writes
@@ -69,7 +68,7 @@ func (j *Janitor) notify(ctx context.Context, t Target, v Verdict, now time.Time
 // createEvent records a Kubernetes event against the target.
 func (j *Janitor) createEvent(ctx context.Context, t Target, message, reason string, now time.Time) error {
 	if j.config.DryRun {
-		log.Printf("**DRY-RUN**: Would create event: %s", message)
+		j.log.Infof("**DRY-RUN**: Would create event: %s", message)
 		return nil
 	}
 
@@ -111,8 +110,8 @@ func (j *Janitor) createEvent(ctx context.Context, t Target, message, reason str
 
 func (j *Janitor) deleteResource(ctx context.Context, t Target) error {
 	if j.config.DryRun {
-		log.Printf("**DRY-RUN**: Would delete %s", t.describe())
-		j.debugLog("Resource would be deleted with propagation policy: Background")
+		j.log.Infof("**DRY-RUN**: Would delete %s", t.describe())
+		j.log.Debugf("Resource would be deleted with propagation policy: Background")
 		return nil
 	}
 
@@ -121,10 +120,10 @@ func (j *Janitor) deleteResource(ctx context.Context, t Target) error {
 
 	var err error
 	if t.Namespace != "" {
-		j.infoLog("Deleting namespaced resource %s/%s", t.Namespace, t.Name)
+		j.log.Infof("Deleting namespaced resource %s/%s", t.Namespace, t.Name)
 		err = j.cluster.Dynamic.Resource(t.GVR).Namespace(t.Namespace).Delete(ctx, t.Name, deleteOptions)
 	} else {
-		j.infoLog("Deleting cluster-scoped resource %s", t.Name)
+		j.log.Infof("Deleting cluster-scoped resource %s", t.Name)
 		err = j.cluster.Dynamic.Resource(t.GVR).Delete(ctx, t.Name, deleteOptions)
 	}
 	if err != nil {
@@ -132,7 +131,7 @@ func (j *Janitor) deleteResource(ctx context.Context, t Target) error {
 	}
 
 	if j.config.WaitAfterDelete > 0 {
-		j.infoLog("Waiting %d seconds after delete", j.config.WaitAfterDelete)
+		j.log.Infof("Waiting %d seconds after delete", j.config.WaitAfterDelete)
 		time.Sleep(time.Duration(j.config.WaitAfterDelete) * time.Second)
 	}
 

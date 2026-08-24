@@ -3,7 +3,7 @@ package janitor
 import (
 	"context"
 	"fmt"
-	"log"
+	"os"
 	"strings"
 	"time"
 
@@ -14,29 +14,18 @@ import (
 type Janitor struct {
 	cluster Cluster
 	config  *Config
+	log     *Logger
 	cache   map[string]interface{}
 }
 
-// New creates a Janitor that works through the given Cluster.
+// New creates a Janitor that works through the given Cluster, reporting what it
+// does in the format the Config names.
 func New(config *Config, cluster Cluster) *Janitor {
 	return &Janitor{
 		cluster: cluster,
 		config:  config,
+		log:     NewLogger(config, os.Stderr),
 		cache:   make(map[string]interface{}),
-	}
-}
-
-// debugLog logs a message if debug mode is enabled
-func (j *Janitor) debugLog(format string, args ...interface{}) {
-	if j.config.Debug {
-		log.Printf("DEBUG: "+format, args...)
-	}
-}
-
-// infoLog logs a message at the info level (always visible unless quiet mode is enabled)
-func (j *Janitor) infoLog(format string, args ...interface{}) {
-	if !j.config.Quiet {
-		log.Printf("INFO: "+format, args...)
 	}
 }
 
@@ -45,44 +34,44 @@ func (j *Janitor) infoLog(format string, args ...interface{}) {
 // What the run considers is settled up front by the Selector, so the loop below
 // only lists and acts. Every resource is reached through exactly one Listing.
 func (j *Janitor) CleanUp(ctx context.Context) error {
-	j.debugLog("Starting cleanup run")
+	j.log.Debugf("Starting cleanup run")
 
 	resourceTypes, err := GetResourceTypes(j.cluster.Typed)
 	if err != nil {
 		return fmt.Errorf("failed to get resource types: %v", err)
 	}
-	j.debugLog("Found %d resource types", len(resourceTypes))
+	j.log.Debugf("Found %d resource types", len(resourceTypes))
 
 	namespaces, err := j.namespaceNames(ctx)
 	if err != nil {
 		return err
 	}
-	j.debugLog("Found %d namespaces", len(namespaces))
+	j.log.Debugf("Found %d namespaces", len(namespaces))
 
 	sel := newSelector(j.config)
 	listings := sel.listings(resourceTypes, namespaces)
-	j.debugLog("Considering %d listings", len(listings))
+	j.log.Debugf("Considering %d listings", len(listings))
 
 	counter := make(map[string]int)
 
 	for _, l := range listings {
 		if ctx.Err() != nil {
-			j.debugLog("Context cancelled, stopping the run")
+			j.log.Debugf("Context cancelled, stopping the run")
 			break
 		}
 
 		targets, err := j.listTargets(ctx, l)
 		if err != nil {
-			log.Printf("Error listing %s in namespace %q: %v", l.Type.Plural, l.Namespace, err)
+			j.log.Errorf("Error listing %s in namespace %q: %v", l.Type.Plural, l.Namespace, err)
 			continue
 		}
-		j.debugLog("Found %d %s in namespace %q", len(targets), l.Type.Plural, l.Namespace)
+		j.log.Debugf("Found %d %s in namespace %q", len(targets), l.Type.Plural, l.Namespace)
 
 		j.processTargets(ctx, sel, targets, counter)
 	}
 
 	j.logCleanupSummary(counter)
-	j.debugLog("Cleanup run completed")
+	j.log.Debugf("Cleanup run completed")
 	return nil
 }
 
@@ -125,17 +114,17 @@ func (j *Janitor) listTargets(ctx context.Context, l listing) ([]Target, error) 
 func (j *Janitor) processTargets(ctx context.Context, sel *selector, targets []Target, counter map[string]int) {
 	for _, t := range targets {
 		if ctx.Err() != nil {
-			j.debugLog("Context cancelled, stopping resource processing")
+			j.log.Debugf("Context cancelled, stopping resource processing")
 			return
 		}
 
 		if !sel.admits(t) {
-			j.debugLog("Resource %s is not considered by this run, skipping", t.describe())
+			j.log.Debugf("Resource %s is not considered by this run, skipping", t.describe())
 			continue
 		}
 
 		if err := j.handleResource(ctx, t, counter); err != nil {
-			log.Printf("Error handling %s: %v", t.describe(), err)
+			j.log.Errorf("Error handling %s: %v", t.describe(), err)
 		}
 	}
 }
@@ -153,9 +142,9 @@ func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[stri
 	}
 
 	if verdict.Action == ActionNone {
-		j.debugLog("%s: nothing to do (%s)", t.describe(), verdict.Source)
+		j.log.Debugf("%s: nothing to do (%s)", t.describe(), verdict.Source)
 	} else {
-		j.infoLog("%s: %s, deadline %s (%s)", t.describe(), verdict.Action,
+		j.log.Infof("%s: %s, deadline %s (%s)", t.describe(), verdict.Action,
 			verdict.Deadline.Format(time.RFC3339), verdict.Source)
 	}
 
@@ -176,28 +165,23 @@ func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[stri
 func (j *Janitor) resourceContext(ctx context.Context, t Target) map[string]interface{} {
 	data, err := j.getResourceContext(ctx, t)
 	if err != nil {
-		log.Printf("Warning: failed to get context for %s: %v", t.describe(), err)
+		j.log.Warnf("failed to get context for %s: %v", t.describe(), err)
 		return map[string]interface{}{}
 	}
 	return data
 }
 
+// logCleanupSummary reports what the run did. The Logger decides which of these
+// lines are written, so nothing here checks whether the run is quiet.
 func (j *Janitor) logCleanupSummary(counter map[string]int) {
-	if j.config.Quiet {
-		return
-	}
-
 	var stats []string
 	for k, v := range counter {
 		stats = append(stats, fmt.Sprintf("%s=%d", k, v))
 	}
 
-	log.Printf("Clean up run completed: %s", strings.Join(stats, ", "))
+	j.log.Infof("Clean up run completed: %s", strings.Join(stats, ", "))
 
-	if j.config.Debug {
-		j.debugLog("Detailed counter values:")
-		for k, v := range counter {
-			j.debugLog("  %s: %d", k, v)
-		}
+	for k, v := range counter {
+		j.log.Debugf("  %s: %d", k, v)
 	}
 }

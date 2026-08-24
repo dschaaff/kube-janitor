@@ -129,8 +129,8 @@ func (c *Config) applyEnv(env func(string) string) error {
 // from the value that field already holds.
 func (c *Config) addFlags(fs *flag.FlagSet) {
 	fs.BoolVar(&c.DryRun, "dry-run", c.DryRun, "Dry run mode: do not change anything, just print what would be done")
-	fs.BoolVar(&c.Debug, "debug", c.Debug, "Debug mode: print more information")
-	fs.BoolVar(&c.Quiet, "quiet", c.Quiet, "Quiet mode: Hides cleanup logs but keeps deletion logs")
+	fs.BoolVar(&c.Debug, "debug", c.Debug, "Debug mode: also log DEBUG lines")
+	fs.BoolVar(&c.Quiet, "quiet", c.Quiet, "Quiet mode: log only WARNING and ERROR lines")
 	fs.BoolVar(&c.Once, "once", c.Once, "Run only once and exit")
 	fs.IntVar(&c.Interval, "interval", c.Interval, "Loop interval in seconds")
 	fs.IntVar(&c.WaitAfterDelete, "wait-after-delete", c.WaitAfterDelete, "Wait time after issuing a delete (in seconds)")
@@ -188,6 +188,10 @@ func (c *Config) validate() error {
 
 	if c.WaitAfterDelete < 0 {
 		return fmt.Errorf("wait-after-delete must be greater than or equal to 0")
+	}
+
+	if _, err := parseLogFormat(c.LogFormat); err != nil {
+		return err
 	}
 
 	return nil
