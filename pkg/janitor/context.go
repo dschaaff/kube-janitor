@@ -3,7 +3,6 @@ package janitor
 import (
 	"context"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 
@@ -56,7 +55,7 @@ func (j *Janitor) getPVCContext(ctx context.Context, t Target) (*ResourceContext
 		for _, volume := range pod.Spec.Volumes {
 			if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.ClaimName == pvcName {
 				isMounted = true
-				log.Printf("PVC %s/%s is mounted by pod %s", namespace, pvcName, pod.Name)
+				j.log.Debugf("PVC %s/%s is mounted by pod %s", namespace, pvcName, pod.Name)
 				break
 			}
 		}
@@ -78,12 +77,12 @@ func (j *Janitor) getPVCContext(ctx context.Context, t Target) (*ResourceContext
 			pattern := fmt.Sprintf("^%s-%s-[0-9]+$", regexp.QuoteMeta(claimPrefix), regexp.QuoteMeta(sts.Name))
 			matched, err := regexp.MatchString(pattern, pvcName)
 			if err != nil {
-				log.Printf("Error matching PVC name pattern: %v", err)
+				j.log.Errorf("Error matching PVC name pattern: %v", err)
 				continue
 			}
 			if matched {
 				isReferenced = true
-				log.Printf("PVC %s/%s is referenced by StatefulSet %s", namespace, pvcName, sts.Name)
+				j.log.Debugf("PVC %s/%s is referenced by StatefulSet %s", namespace, pvcName, sts.Name)
 				break
 			}
 		}
@@ -96,7 +95,7 @@ func (j *Janitor) getPVCContext(ctx context.Context, t Target) (*ResourceContext
 	if !isReferenced {
 		// Check Deployments
 		if referenced, err := j.isPVCReferencedByDeployments(ctx, namespace, pvcName); err != nil {
-			log.Printf("Error checking deployments: %v", err)
+			j.log.Errorf("Error checking deployments: %v", err)
 		} else if referenced {
 			isReferenced = true
 		}
@@ -104,7 +103,7 @@ func (j *Janitor) getPVCContext(ctx context.Context, t Target) (*ResourceContext
 		// Check Jobs
 		if !isReferenced {
 			if referenced, err := j.isPVCReferencedByJobs(ctx, namespace, pvcName); err != nil {
-				log.Printf("Error checking jobs: %v", err)
+				j.log.Errorf("Error checking jobs: %v", err)
 			} else if referenced {
 				isReferenced = true
 			}
@@ -113,7 +112,7 @@ func (j *Janitor) getPVCContext(ctx context.Context, t Target) (*ResourceContext
 		// Check CronJobs
 		if !isReferenced {
 			if referenced, err := j.isPVCReferencedByCronJobs(ctx, namespace, pvcName); err != nil {
-				log.Printf("Error checking cronjobs: %v", err)
+				j.log.Errorf("Error checking cronjobs: %v", err)
 			} else if referenced {
 				isReferenced = true
 			}
@@ -136,7 +135,7 @@ func (j *Janitor) isPVCReferencedByDeployments(ctx context.Context, namespace, p
 	for _, deploy := range deployments.Items {
 		for _, volume := range deploy.Spec.Template.Spec.Volumes {
 			if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.ClaimName == pvcName {
-				log.Printf("PVC %s/%s is referenced by Deployment %s", namespace, pvcName, deploy.Name)
+				j.log.Debugf("PVC %s/%s is referenced by Deployment %s", namespace, pvcName, deploy.Name)
 				return true, nil
 			}
 		}
@@ -153,7 +152,7 @@ func (j *Janitor) isPVCReferencedByJobs(ctx context.Context, namespace, pvcName 
 	for _, job := range jobs.Items {
 		for _, volume := range job.Spec.Template.Spec.Volumes {
 			if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.ClaimName == pvcName {
-				log.Printf("PVC %s/%s is referenced by Job %s", namespace, pvcName, job.Name)
+				j.log.Debugf("PVC %s/%s is referenced by Job %s", namespace, pvcName, job.Name)
 				return true, nil
 			}
 		}
@@ -170,7 +169,7 @@ func (j *Janitor) isPVCReferencedByCronJobs(ctx context.Context, namespace, pvcN
 	for _, cronJob := range cronJobs.Items {
 		for _, volume := range cronJob.Spec.JobTemplate.Spec.Template.Spec.Volumes {
 			if volume.PersistentVolumeClaim != nil && volume.PersistentVolumeClaim.ClaimName == pvcName {
-				log.Printf("PVC %s/%s is referenced by CronJob %s", namespace, pvcName, cronJob.Name)
+				j.log.Debugf("PVC %s/%s is referenced by CronJob %s", namespace, pvcName, cronJob.Name)
 				return true, nil
 			}
 		}
