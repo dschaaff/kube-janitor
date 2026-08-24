@@ -48,6 +48,13 @@ A named condition that assigns a TTL to the Targets it matches, for resources th
 carry no annotation of their own.
 _Avoid_: Policy, matcher, filter
 
+**Configuration**:
+The settings one process runs under: what it considers, what it does when a
+Deadline passes, and the Rules it judges by. It is settled once, before the first
+run, and never changes while the process lives.
+_Avoid_: Options, settings, flags (flags are one of the things a Configuration is
+built from, not what it is)
+
 **Resource context**:
 Facts about a Target that cannot be read from the resource itself and must be
 looked up in the cluster, such as whether a volume claim is mounted. Rules may
@@ -90,3 +97,10 @@ The module that resolves the ambient credentials and returns the Cluster they
 grant. A run is handed a Cluster and never builds one, so the whole of a run can
 be exercised against fakes.
 _Avoid_: Client factory, bootstrap, initialise
+
+**Load**:
+The module that resolves the process's arguments and environment into a
+Configuration. What it hands back is complete, so nothing downstream has a
+half-built Configuration to finish. It is to the Configuration what Connect is
+to the Cluster.
+_Avoid_: Parse, init, setup
