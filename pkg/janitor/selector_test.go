@@ -32,13 +32,13 @@ func TestSelectorListings(t *testing.T) {
 	tests := []struct {
 		name       string
 		configure  func(*Config)
-		types      []ResourceType
+		types      []resourceType
 		namespaces []string
 		want       []string
 	}{
 		{
 			name:       "a namespaced type is listed once per admitted namespace",
-			types:      []ResourceType{podResourceType},
+			types:      []resourceType{podResourceType},
 			namespaces: []string{"staging", "prod"},
 			want:       []string{"pods@staging", "pods@prod"},
 		},
@@ -47,13 +47,13 @@ func TestSelectorListings(t *testing.T) {
 			// appearing once in discovery must appear once here.
 			name:       "namespaces are listed exactly once",
 			configure:  func(c *Config) { c.IncludeClusterResources = true },
-			types:      []ResourceType{namespaceResourceType, podResourceType},
+			types:      []resourceType{namespaceResourceType, podResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"namespaces@", "pods@staging"},
 		},
 		{
 			name:       "namespaces come first whatever order discovery reported",
-			types:      []ResourceType{podResourceType, deploymentResourceType, namespaceResourceType},
+			types:      []resourceType{podResourceType, deploymentResourceType, namespaceResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"namespaces@", "pods@staging", "deployments@staging"},
 		},
@@ -61,42 +61,42 @@ func TestSelectorListings(t *testing.T) {
 			// Discovery reports types in map order, so the plan sorts them: by
 			// group first, which puts the core group ahead of the named ones.
 			name:       "the order does not depend on the order discovery reported",
-			types:      []ResourceType{ingressResourceType, deploymentResourceType, podResourceType},
+			types:      []resourceType{ingressResourceType, deploymentResourceType, podResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"pods@staging", "deployments@staging", "ingresses@staging"},
 		},
 		{
 			name:       "an excluded namespace is not listed",
 			configure:  func(c *Config) { c.ExcludeNamespaces = []string{"kube-system"} },
-			types:      []ResourceType{podResourceType},
+			types:      []resourceType{podResourceType},
 			namespaces: []string{"staging", "kube-system"},
 			want:       []string{"pods@staging"},
 		},
 		{
 			name:       "only included namespaces are listed",
 			configure:  func(c *Config) { c.IncludeNamespaces = []string{"staging"} },
-			types:      []ResourceType{podResourceType},
+			types:      []resourceType{podResourceType},
 			namespaces: []string{"staging", "prod"},
 			want:       []string{"pods@staging"},
 		},
 		{
 			name:       "exclusion beats inclusion",
 			configure:  func(c *Config) { c.IncludeNamespaces = []string{"staging"}; c.ExcludeNamespaces = []string{"staging"} },
-			types:      []ResourceType{podResourceType},
+			types:      []resourceType{podResourceType},
 			namespaces: []string{"staging"},
 			want:       nil,
 		},
 		{
 			name:       "an excluded type is not listed at all",
 			configure:  func(c *Config) { c.ExcludeResources = []string{"pods"} },
-			types:      []ResourceType{podResourceType, deploymentResourceType},
+			types:      []resourceType{podResourceType, deploymentResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"deployments@staging"},
 		},
 		{
 			name:       "only included types are listed",
 			configure:  func(c *Config) { c.IncludeResources = []string{"deployments"} },
-			types:      []ResourceType{podResourceType, deploymentResourceType},
+			types:      []resourceType{podResourceType, deploymentResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"deployments@staging"},
 		},
@@ -105,20 +105,20 @@ func TestSelectorListings(t *testing.T) {
 			// irregular one is matched as listed rather than derived from the kind.
 			name:       "an irregular plural is matched as listed",
 			configure:  func(c *Config) { c.IncludeResources = []string{"ingresses"} },
-			types:      []ResourceType{ingressResourceType, podResourceType},
+			types:      []resourceType{ingressResourceType, podResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"ingresses@staging"},
 		},
 		{
 			name:       "a cluster-scoped type is left out unless cluster resources are included",
-			types:      []ResourceType{persistentVolumeResourceType, podResourceType},
+			types:      []resourceType{persistentVolumeResourceType, podResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"pods@staging"},
 		},
 		{
 			name:       "a cluster-scoped type is listed once cluster resources are included",
 			configure:  func(c *Config) { c.IncludeClusterResources = true },
-			types:      []ResourceType{persistentVolumeResourceType, podResourceType},
+			types:      []resourceType{persistentVolumeResourceType, podResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"persistentvolumes@", "pods@staging"},
 		},
@@ -126,28 +126,28 @@ func TestSelectorListings(t *testing.T) {
 			// The README promises namespaces are the one cluster-scoped type a run
 			// handles without the flag.
 			name:       "namespaces are listed without cluster resources being included",
-			types:      []ResourceType{namespaceResourceType},
+			types:      []resourceType{namespaceResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"namespaces@"},
 		},
 		{
 			name:       "namespaces are left out when the include list does not name them",
 			configure:  func(c *Config) { c.IncludeResources = []string{"pods"} },
-			types:      []ResourceType{namespaceResourceType, podResourceType},
+			types:      []resourceType{namespaceResourceType, podResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"pods@staging"},
 		},
 		{
 			name:       "excluding namespaces as a type stops them being listed",
 			configure:  func(c *Config) { c.ExcludeResources = []string{"namespaces"} },
-			types:      []ResourceType{namespaceResourceType, podResourceType},
+			types:      []resourceType{namespaceResourceType, podResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"pods@staging"},
 		},
 		{
 			name:       "a cluster holding no admitted namespace still lists a cluster-scoped type",
 			configure:  func(c *Config) { c.IncludeNamespaces = []string{"nothing-here"} },
-			types:      []ResourceType{namespaceResourceType, podResourceType},
+			types:      []resourceType{namespaceResourceType, podResourceType},
 			namespaces: []string{"staging"},
 			want:       []string{"namespaces@"},
 		},

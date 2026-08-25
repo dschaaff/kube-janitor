@@ -5,16 +5,16 @@ import (
 	"time"
 )
 
-// Action is what a Verdict concludes should happen to a Target.
-type Action int
+// action is what a Verdict concludes should happen to a Target.
+type action int
 
 const (
-	// ActionNone leaves the target alone.
-	ActionNone Action = iota
-	// ActionDelete deletes the target.
-	ActionDelete
-	// ActionNotify warns that the target will be deleted.
-	ActionNotify
+	// actionNone leaves the target alone.
+	actionNone action = iota
+	// actionDelete deletes the target.
+	actionDelete
+	// actionNotify warns that the target will be deleted.
+	actionNotify
 )
 
 // Wording that never varies, folded by the compiler rather than formatted per
@@ -25,20 +25,20 @@ const (
 	expiryDetail           = "annotation " + ExpiryAnnotation + " is set"
 )
 
-func (a Action) String() string {
+func (a action) String() string {
 	switch a {
-	case ActionDelete:
+	case actionDelete:
 		return "delete"
-	case ActionNotify:
+	case actionNotify:
 		return "notify"
 	default:
 		return "none"
 	}
 }
 
-// Verdict is the conclusion about one Target.
-type Verdict struct {
-	Action Action
+// verdict is the conclusion about one Target.
+type verdict struct {
+	Action action
 
 	// Deadline is the moment the target becomes eligible for deletion. Zero when
 	// no source supplied one.
@@ -63,7 +63,7 @@ type Verdict struct {
 //
 // resourceContext is only called if rule evaluation is reached, because building
 // it costs several cluster reads. It may be nil.
-func decide(t Target, cfg *Config, now time.Time, resourceContext func() map[string]interface{}) (Verdict, error) {
+func decide(t Target, cfg *Config, now time.Time, resourceContext func() map[string]interface{}) (verdict, error) {
 	if expiry, ok := t.Annotations[ExpiryAnnotation]; ok {
 		return decideFromExpiry(t, cfg, now, expiry)
 	}
@@ -75,10 +75,10 @@ func decide(t Target, cfg *Config, now time.Time, resourceContext func() map[str
 	return decideFromRules(t, cfg, now, resourceContext)
 }
 
-func decideFromExpiry(t Target, cfg *Config, now time.Time, expiry string) (Verdict, error) {
+func decideFromExpiry(t Target, cfg *Config, now time.Time, expiry string) (verdict, error) {
 	deadline, err := parseExpiry(expiry)
 	if err != nil {
-		return Verdict{}, fmt.Errorf("invalid expiry value: %v", err)
+		return verdict{}, fmt.Errorf("invalid expiry value: %v", err)
 	}
 
 	return conclude(t, cfg, now, deadlineSource{
@@ -90,15 +90,15 @@ func decideFromExpiry(t Target, cfg *Config, now time.Time, expiry string) (Verd
 	}), nil
 }
 
-func decideFromTTL(t Target, cfg *Config, now time.Time, ttl string) (Verdict, error) {
+func decideFromTTL(t Target, cfg *Config, now time.Time, ttl string) (verdict, error) {
 	lifetime, err := parseTTL(ttl)
 	if err != nil {
-		return Verdict{}, fmt.Errorf("invalid TTL value: %v", err)
+		return verdict{}, fmt.Errorf("invalid TTL value: %v", err)
 	}
 
 	// An unlimited TTL supplies no deadline, and stops rules being considered.
 	if lifetime < 0 {
-		return Verdict{Source: sourceTTLAnnotation}, nil
+		return verdict{Source: sourceTTLAnnotation}, nil
 	}
 
 	from := deploymentTime(t, cfg)
@@ -112,9 +112,9 @@ func decideFromTTL(t Target, cfg *Config, now time.Time, ttl string) (Verdict, e
 	}), nil
 }
 
-func decideFromRules(t Target, cfg *Config, now time.Time, resourceContext func() map[string]interface{}) (Verdict, error) {
+func decideFromRules(t Target, cfg *Config, now time.Time, resourceContext func() map[string]interface{}) (verdict, error) {
 	if len(cfg.Rules) == 0 {
-		return Verdict{}, nil
+		return verdict{}, nil
 	}
 
 	var context map[string]interface{}
@@ -129,7 +129,7 @@ func decideFromRules(t Target, cfg *Config, now time.Time, resourceContext func(
 
 		lifetime, err := parseTTL(rule.TTL)
 		if err != nil {
-			return Verdict{}, fmt.Errorf("invalid TTL in rule %s: %v", rule.ID, err)
+			return verdict{}, fmt.Errorf("invalid TTL in rule %s: %v", rule.ID, err)
 		}
 
 		// A matching rule with an unlimited TTL is passed over, and rules after it
@@ -150,7 +150,7 @@ func decideFromRules(t Target, cfg *Config, now time.Time, resourceContext func(
 		}), nil
 	}
 
-	return Verdict{}, nil
+	return verdict{}, nil
 }
 
 // deadlineSource is one resolved deadline and the ingredients for its wording.
@@ -192,10 +192,10 @@ func (s deadlineSource) expiredAt() string {
 //
 // Wording is built only for a verdict that acts, so the common case of a
 // deadline still in the future formats nothing.
-func conclude(t Target, cfg *Config, now time.Time, s deadlineSource) Verdict {
+func conclude(t Target, cfg *Config, now time.Time, s deadlineSource) verdict {
 	if now.After(s.deadline) {
-		return Verdict{
-			Action:      ActionDelete,
+		return verdict{
+			Action:      actionDelete,
 			Deadline:    s.deadline,
 			Source:      s.source,
 			EventReason: s.eventReason,
@@ -207,8 +207,8 @@ func conclude(t Target, cfg *Config, now time.Time, s deadlineSource) Verdict {
 	if cfg.DeleteNotification > 0 && !t.wasNotified() {
 		notifyFrom := s.deadline.Add(-time.Duration(cfg.DeleteNotification) * time.Second)
 		if now.After(notifyFrom) {
-			return Verdict{
-				Action:      ActionNotify,
+			return verdict{
+				Action:      actionNotify,
 				Deadline:    s.deadline,
 				Source:      s.source,
 				EventReason: "DeleteNotification",
@@ -218,7 +218,7 @@ func conclude(t Target, cfg *Config, now time.Time, s deadlineSource) Verdict {
 		}
 	}
 
-	return Verdict{Deadline: s.deadline, Source: s.source}
+	return verdict{Deadline: s.deadline, Source: s.source}
 }
 
 // deploymentTime returns the moment a target's lifetime counts from: the

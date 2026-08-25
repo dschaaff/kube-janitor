@@ -12,13 +12,13 @@ func TestGetResourceTypes(t *testing.T) {
 func TestFilterDeprecatedAPIs(t *testing.T) {
 	tests := []struct {
 		name           string
-		resourceTypes  map[string]ResourceType
+		resourceTypes  map[string]resourceType
 		expectedKeys   []string
 		unexpectedKeys []string
 	}{
 		{
 			name: "removes endpoints when endpointslices exist",
-			resourceTypes: map[string]ResourceType{
+			resourceTypes: map[string]resourceType{
 				"v1/endpoints": {
 					Group:      "",
 					Version:    "v1",
@@ -46,7 +46,7 @@ func TestFilterDeprecatedAPIs(t *testing.T) {
 		},
 		{
 			name: "keeps endpoints when endpointslices do not exist",
-			resourceTypes: map[string]ResourceType{
+			resourceTypes: map[string]resourceType{
 				"v1/endpoints": {
 					Group:      "",
 					Version:    "v1",
@@ -67,7 +67,7 @@ func TestFilterDeprecatedAPIs(t *testing.T) {
 		},
 		{
 			name: "no changes when neither endpoints nor endpointslices exist",
-			resourceTypes: map[string]ResourceType{
+			resourceTypes: map[string]resourceType{
 				"v1/pods": {
 					Group:      "",
 					Version:    "v1",
@@ -91,7 +91,7 @@ func TestFilterDeprecatedAPIs(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create a copy of the map to avoid modifying the test data
-			resourceTypesMap := make(map[string]ResourceType)
+			resourceTypesMap := make(map[string]resourceType)
 			for k, v := range tt.resourceTypes {
 				resourceTypesMap[k] = v
 			}

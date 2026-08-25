@@ -13,7 +13,7 @@ import (
 )
 
 // pvcResourceType is the Resource type persistent volume claims are listed as.
-var pvcResourceType = ResourceType{
+var pvcResourceType = resourceType{
 	Version: "v1", Kind: "PersistentVolumeClaim", Plural: "persistentvolumeclaims", Namespaced: true,
 }
 

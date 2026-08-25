@@ -31,7 +31,7 @@ func newEffectsFixture(t *testing.T, cfg *Config) effectsFixture {
 	return effectsFixture{
 		janitor: New(cfg, Cluster{
 			Typed:   fake.NewSimpleClientset(),
-			Dynamic: dynamicClientFor([]ResourceType{podResourceType}, obj),
+			Dynamic: dynamicClientFor([]resourceType{podResourceType}, obj),
 		}, NewLogger(cfg, logs), notifier),
 		target:   mustTarget(t, obj, podResourceType),
 		notifier: notifier,
@@ -64,15 +64,15 @@ func (f effectsFixture) events(t *testing.T) []string {
 func TestApplyDelete(t *testing.T) {
 	f := newEffectsFixture(t, &Config{})
 
-	verdict := Verdict{
-		Action:      ActionDelete,
+	v := verdict{
+		Action:      actionDelete,
 		Deadline:    now.Add(-time.Hour),
 		Source:      "annotation " + TTLAnnotation,
 		EventReason: "TTLExpired",
 		Message:     "Pod staging/web expired and will be deleted",
 	}
 
-	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+	if err := f.janitor.apply(context.Background(), f.target, v, now); err != nil {
 		t.Fatalf("apply() error = %v", err)
 	}
 
@@ -87,7 +87,7 @@ func TestApplyDelete(t *testing.T) {
 func TestApplyNone(t *testing.T) {
 	f := newEffectsFixture(t, &Config{})
 
-	if err := f.janitor.apply(context.Background(), f.target, Verdict{Action: ActionNone}, now); err != nil {
+	if err := f.janitor.apply(context.Background(), f.target, verdict{Action: actionNone}, now); err != nil {
 		t.Fatalf("apply() error = %v", err)
 	}
 
@@ -102,13 +102,13 @@ func TestApplyNone(t *testing.T) {
 func TestApplyDryRunWritesNothing(t *testing.T) {
 	f := newEffectsFixture(t, &Config{DryRun: true})
 
-	verdict := Verdict{
-		Action:      ActionDelete,
+	v := verdict{
+		Action:      actionDelete,
 		EventReason: "TTLExpired",
 		Message:     "Pod staging/web expired and will be deleted",
 	}
 
-	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+	if err := f.janitor.apply(context.Background(), f.target, v, now); err != nil {
 		t.Fatalf("apply() error = %v", err)
 	}
 
@@ -125,8 +125,8 @@ func TestApplyDryRunWritesNothing(t *testing.T) {
 func TestApplyStampsEventsWithTheDecisionTime(t *testing.T) {
 	f := newEffectsFixture(t, &Config{})
 
-	verdict := Verdict{Action: ActionDelete, EventReason: "TTLExpired", Message: "gone"}
-	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+	v := verdict{Action: actionDelete, EventReason: "TTLExpired", Message: "gone"}
+	if err := f.janitor.apply(context.Background(), f.target, v, now); err != nil {
 		t.Fatalf("apply() error = %v", err)
 	}
 
@@ -153,15 +153,15 @@ func TestApplyStampsEventsWithTheDecisionTime(t *testing.T) {
 func TestApplyNotify(t *testing.T) {
 	f := newEffectsFixture(t, &Config{DeleteNotification: 600})
 
-	verdict := Verdict{
-		Action:      ActionNotify,
+	v := verdict{
+		Action:      actionNotify,
 		Deadline:    now.Add(time.Hour),
 		Source:      "annotation " + TTLAnnotation,
 		EventReason: "DeleteNotification",
 		Message:     "Pod staging/web will be deleted at some point (TTL 1h)",
 	}
 
-	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+	if err := f.janitor.apply(context.Background(), f.target, v, now); err != nil {
 		t.Fatalf("apply() error = %v", err)
 	}
 
@@ -172,8 +172,8 @@ func TestApplyNotify(t *testing.T) {
 		t.Error("pod was deleted on a notify verdict, want it left alone")
 	}
 
-	if got := f.notifier.messages; len(got) != 1 || got[0] != verdict.Message {
-		t.Errorf("delivered = %q, want [%q]", got, verdict.Message)
+	if got := f.notifier.messages; len(got) != 1 || got[0] != v.Message {
+		t.Errorf("delivered = %q, want [%q]", got, v.Message)
 	}
 
 	// Marks the target so the same run does not notify twice. This is not written
@@ -188,23 +188,23 @@ func TestApplyNotify(t *testing.T) {
 func TestApplyNotifyReportsOneWording(t *testing.T) {
 	f := newEffectsFixture(t, &Config{DeleteNotification: 600})
 
-	verdict := Verdict{
-		Action:      ActionNotify,
+	v := verdict{
+		Action:      actionNotify,
 		EventReason: "DeleteNotification",
 		Message:     "[prod-eu] Pod staging/web will be deleted",
 	}
 
-	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+	if err := f.janitor.apply(context.Background(), f.target, v, now); err != nil {
 		t.Fatalf("apply() error = %v", err)
 	}
 
-	if got := f.notifier.messages; len(got) != 1 || got[0] != verdict.Message {
-		t.Errorf("delivered = %q, want [%q]", got, verdict.Message)
+	if got := f.notifier.messages; len(got) != 1 || got[0] != v.Message {
+		t.Errorf("delivered = %q, want [%q]", got, v.Message)
 	}
 
 	recorded := events(t, f.janitor)
-	if len(recorded) != 1 || recorded[0].Message != verdict.Message {
-		t.Fatalf("events = %v, want one saying %q", recorded, verdict.Message)
+	if len(recorded) != 1 || recorded[0].Message != v.Message {
+		t.Fatalf("events = %v, want one saying %q", recorded, v.Message)
 	}
 }
 
@@ -214,13 +214,13 @@ func TestApplyNotifySurvivesDeliveryFailure(t *testing.T) {
 	f := newEffectsFixture(t, &Config{DeleteNotification: 600})
 	f.notifier.err = errors.New("webhook is down")
 
-	verdict := Verdict{
-		Action:      ActionNotify,
+	v := verdict{
+		Action:      actionNotify,
 		EventReason: "DeleteNotification",
 		Message:     "Pod staging/web will be deleted",
 	}
 
-	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+	if err := f.janitor.apply(context.Background(), f.target, v, now); err != nil {
 		t.Fatalf("apply() error = %v, want the run to carry on", err)
 	}
 
@@ -242,13 +242,13 @@ func TestApplyNotifySurvivesDeliveryFailure(t *testing.T) {
 func TestApplyNotifyDeliversNothingInDryRun(t *testing.T) {
 	f := newEffectsFixture(t, &Config{DeleteNotification: 600, DryRun: true})
 
-	verdict := Verdict{
-		Action:      ActionNotify,
+	v := verdict{
+		Action:      actionNotify,
 		EventReason: "DeleteNotification",
 		Message:     "Pod staging/web will be deleted",
 	}
 
-	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+	if err := f.janitor.apply(context.Background(), f.target, v, now); err != nil {
 		t.Fatalf("apply() error = %v", err)
 	}
 
@@ -263,10 +263,10 @@ func TestApplyNotifyDeliversNothingInDryRun(t *testing.T) {
 func TestApplyWaitsAfterDelete(t *testing.T) {
 	f := newEffectsFixture(t, &Config{WaitAfterDelete: 1})
 
-	verdict := Verdict{Action: ActionDelete, EventReason: "TTLExpired", Message: "gone"}
+	v := verdict{Action: actionDelete, EventReason: "TTLExpired", Message: "gone"}
 
 	start := time.Now()
-	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+	if err := f.janitor.apply(context.Background(), f.target, v, now); err != nil {
 		t.Fatalf("apply() error = %v", err)
 	}
 

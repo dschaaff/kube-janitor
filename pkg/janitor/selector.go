@@ -19,7 +19,7 @@ func isNamespaces(group, plural string) bool {
 // listing is one list a run makes: every resource of one Resource type in one
 // namespace, or across the cluster when Namespace is empty.
 type listing struct {
-	Type      ResourceType
+	Type      resourceType
 	Namespace string
 }
 
@@ -43,15 +43,15 @@ func newSelector(cfg *Config) *selector {
 //
 // Discovery reports types in map order, so sorting here is what makes a run's
 // sequence of cluster reads reproducible.
-func (s *selector) listings(types []ResourceType, namespaces []string) []listing {
-	admitted := make([]ResourceType, 0, len(types))
+func (s *selector) listings(types []resourceType, namespaces []string) []listing {
+	admitted := make([]resourceType, 0, len(types))
 	for _, rt := range types {
 		if s.admitsType(rt) {
 			admitted = append(admitted, rt)
 		}
 	}
 
-	slices.SortFunc(admitted, func(a, b ResourceType) int {
+	slices.SortFunc(admitted, func(a, b resourceType) int {
 		return cmp.Or(
 			cmp.Compare(typeRank(a), typeRank(b)),
 			cmp.Compare(a.Group, b.Group),
@@ -91,7 +91,7 @@ func (s *selector) admits(t Target) bool {
 // takes precedence over inclusion. A cluster-scoped type needs cluster resources
 // to be included, except for namespaces, which a run always considers when they
 // are named: see --include-cluster-resources in the README.
-func (s *selector) admitsType(rt ResourceType) bool {
+func (s *selector) admitsType(rt resourceType) bool {
 	if slices.Contains(s.cfg.ExcludeResources, rt.Plural) {
 		return false
 	}
@@ -132,7 +132,7 @@ func (s *selector) admittedNamespaces(namespaces []string) []string {
 }
 
 // typeRank orders namespaces ahead of every other Resource type.
-func typeRank(rt ResourceType) int {
+func typeRank(rt resourceType) int {
 	if isNamespaces(rt.Group, rt.Plural) {
 		return 0
 	}

@@ -32,7 +32,7 @@ type Target struct {
 // and GVR, so nothing downstream re-derives them and no plural is ever guessed.
 // The caller must pass the type it listed the resource under; nothing here can
 // check that.
-func newTarget(u *unstructured.Unstructured, rt ResourceType) Target {
+func newTarget(u *unstructured.Unstructured, rt resourceType) Target {
 	return Target{
 		Kind:        rt.Kind,
 		APIVersion:  rt.apiVersion(),

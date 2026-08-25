@@ -9,9 +9,9 @@ import (
 	"k8s.io/client-go/kubernetes"
 )
 
-// ResourceType is a kind as the cluster's discovery reports it, carrying the
+// resourceType is a kind as the cluster's discovery reports it, carrying the
 // plural a Target is listed and deleted through.
-type ResourceType struct {
+type resourceType struct {
 	Group      string
 	Version    string
 	Kind       string
@@ -19,24 +19,24 @@ type ResourceType struct {
 	Namespaced bool
 }
 
-func (rt ResourceType) groupVersion() schema.GroupVersion {
+func (rt resourceType) groupVersion() schema.GroupVersion {
 	return schema.GroupVersion{Group: rt.Group, Version: rt.Version}
 }
 
 // apiVersion renders the group and version the way a Kubernetes object reports
 // it: "v1" for the core group, "group/version" for every other.
-func (rt ResourceType) apiVersion() string {
+func (rt resourceType) apiVersion() string {
 	return rt.groupVersion().String()
 }
 
 // gvr is the resource a target of this type is listed and deleted through.
-func (rt ResourceType) gvr() schema.GroupVersionResource {
+func (rt resourceType) gvr() schema.GroupVersionResource {
 	return rt.groupVersion().WithResource(rt.Plural)
 }
 
 // getResourceTypes returns all available resource types in the cluster
-func getResourceTypes(client kubernetes.Interface) ([]ResourceType, error) {
-	resourceTypesMap := make(map[string]ResourceType)
+func getResourceTypes(client kubernetes.Interface) ([]resourceType, error) {
+	resourceTypesMap := make(map[string]resourceType)
 
 	// Get server resources for core API group
 	resources, err := client.Discovery().ServerResourcesForGroupVersion("v1")
@@ -50,7 +50,7 @@ func getResourceTypes(client kubernetes.Interface) ([]ResourceType, error) {
 		}
 
 		key := fmt.Sprintf("v1/%s", r.Name)
-		resourceTypesMap[key] = ResourceType{
+		resourceTypesMap[key] = resourceType{
 			Group:      "",
 			Version:    "v1",
 			Kind:       r.Kind,
@@ -78,7 +78,7 @@ func getResourceTypes(client kubernetes.Interface) ([]ResourceType, error) {
 			}
 
 			key := fmt.Sprintf("%s/%s", version.GroupVersion, r.Name)
-			resourceTypesMap[key] = ResourceType{
+			resourceTypesMap[key] = resourceType{
 				Group:      group.Name,
 				Version:    version.Version,
 				Kind:       r.Kind,
@@ -92,7 +92,7 @@ func getResourceTypes(client kubernetes.Interface) ([]ResourceType, error) {
 	filterDeprecatedAPIs(resourceTypesMap)
 
 	// Convert map to slice
-	resourceTypes := make([]ResourceType, 0, len(resourceTypesMap))
+	resourceTypes := make([]resourceType, 0, len(resourceTypesMap))
 	for _, rt := range resourceTypesMap {
 		resourceTypes = append(resourceTypes, rt)
 	}
@@ -101,7 +101,7 @@ func getResourceTypes(client kubernetes.Interface) ([]ResourceType, error) {
 }
 
 // filterDeprecatedAPIs removes deprecated API resources when newer alternatives exist
-func filterDeprecatedAPIs(resourceTypesMap map[string]ResourceType) {
+func filterDeprecatedAPIs(resourceTypesMap map[string]resourceType) {
 	// Remove v1/endpoints if discovery.k8s.io/v1/endpointslices exists
 	if _, hasEndpointSlices := resourceTypesMap["discovery.k8s.io/v1/endpointslices"]; hasEndpointSlices {
 		delete(resourceTypesMap, "v1/endpoints")

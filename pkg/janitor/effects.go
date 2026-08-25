@@ -14,15 +14,15 @@ import (
 //
 // now is the same instant the verdict was reached, so a resource's event
 // timestamps line up with the decision that produced them.
-func (j *Janitor) apply(ctx context.Context, t Target, v Verdict, now time.Time) error {
+func (j *Janitor) apply(ctx context.Context, t Target, v verdict, now time.Time) error {
 	switch v.Action {
-	case ActionDelete:
+	case actionDelete:
 		if err := j.createEvent(ctx, t, v.Message, v.EventReason, now); err != nil {
 			return err
 		}
 		return j.deleteResource(ctx, t)
 
-	case ActionNotify:
+	case actionNotify:
 		return j.notify(ctx, t, v, now)
 	}
 
@@ -30,7 +30,7 @@ func (j *Janitor) apply(ctx context.Context, t Target, v Verdict, now time.Time)
 }
 
 // notify warns that a target is about to be deleted.
-func (j *Janitor) notify(ctx context.Context, t Target, v Verdict, now time.Time) error {
+func (j *Janitor) notify(ctx context.Context, t Target, v verdict, now time.Time) error {
 	if j.config.DryRun {
 		j.log.Infof("**DRY-RUN**: Would send delete notification for %s", t.describe())
 		j.log.Debugf("Notification: %s", v.Message)

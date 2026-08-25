@@ -69,9 +69,9 @@ func TestRuleMatches(t *testing.T) {
 	// expression.
 	const labelIsTrue = "metadata.labels.test == 'true'"
 
-	services := ResourceType{Version: "v1", Kind: "Service", Plural: "services", Namespaced: true}
+	services := resourceType{Version: "v1", Kind: "Service", Plural: "services", Namespaced: true}
 
-	labelled := func(rt ResourceType, value string) Target {
+	labelled := func(rt resourceType, value string) Target {
 		return mustTarget(t, &unstructured.Unstructured{Object: map[string]interface{}{
 			"metadata": map[string]interface{}{
 				"name":      "x",

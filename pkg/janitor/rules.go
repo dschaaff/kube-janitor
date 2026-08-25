@@ -22,8 +22,8 @@ type Rule struct {
 	compiledExpr *jmespath.JMESPath
 }
 
-// RulesFile represents the structure of the YAML rules file
-type RulesFile struct {
+// rulesFile represents the structure of the YAML rules file
+type rulesFile struct {
 	Rules []Rule `yaml:"rules"`
 }
 
@@ -99,17 +99,17 @@ func loadRules(filename string) ([]Rule, error) {
 		return nil, fmt.Errorf("failed to read rules file: %v", err)
 	}
 
-	var rulesFile RulesFile
-	if err := yaml.Unmarshal(data, &rulesFile); err != nil {
+	var file rulesFile
+	if err := yaml.Unmarshal(data, &file); err != nil {
 		return nil, fmt.Errorf("failed to parse rules file: %v", err)
 	}
 
 	// Validate and compile all rules
-	for i := range rulesFile.Rules {
-		if err := rulesFile.Rules[i].ValidateAndCompile(); err != nil {
+	for i := range file.Rules {
+		if err := file.Rules[i].ValidateAndCompile(); err != nil {
 			return nil, fmt.Errorf("invalid rule #%d: %v", i, err)
 		}
 	}
 
-	return rulesFile.Rules, nil
+	return file.Rules, nil
 }

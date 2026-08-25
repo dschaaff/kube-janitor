@@ -26,7 +26,7 @@ import (
 // out is where the run's log lines go. A case that does not care leaves it nil
 // and the lines are dropped.
 type clusterFixture struct {
-	types      []ResourceType
+	types      []resourceType
 	namespaces []string
 	objects    []*unstructured.Unstructured
 	out        io.Writer
@@ -97,7 +97,7 @@ func events(t *testing.T, j *Janitor) []*corev1.Event {
 // discoveryFor reports the given types, grouped the way a real API server groups
 // them. getResourceTypes asks for the core group first, so a "v1" list is always
 // present even when no core-group type is fixtured.
-func discoveryFor(types []ResourceType) []*metav1.APIResourceList {
+func discoveryFor(types []resourceType) []*metav1.APIResourceList {
 	byGroupVersion := map[string]*metav1.APIResourceList{}
 	var order []string
 
@@ -130,7 +130,7 @@ func discoveryFor(types []ResourceType) []*metav1.APIResourceList {
 }
 
 // dynamicClientFor is a dynamic fake that knows how to list the given types.
-func dynamicClientFor(types []ResourceType, objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
+func dynamicClientFor(types []resourceType, objects ...runtime.Object) *dynamicfake.FakeDynamicClient {
 	kinds := map[schema.GroupVersionResource]string{}
 	for _, rt := range types {
 		kinds[rt.gvr()] = rt.Kind + "List"
@@ -142,7 +142,7 @@ func dynamicClientFor(types []ResourceType, objects ...runtime.Object) *dynamicf
 // expiringObject carries an expiry annotation at the given offset from now, so a
 // run judges it without any rule being configured. A negative offset has passed,
 // so the run deletes it; a positive one has not, so at most the run warns.
-func expiringObject(rt ResourceType, namespace, name string, in time.Duration) *unstructured.Unstructured {
+func expiringObject(rt resourceType, namespace, name string, in time.Duration) *unstructured.Unstructured {
 	object := resourceObject(rt, namespace, name)
 	metadata := object.Object["metadata"].(map[string]interface{})
 	metadata["creationTimestamp"] = time.Now().Add(-24 * time.Hour).Format(time.RFC3339)
@@ -153,12 +153,12 @@ func expiringObject(rt ResourceType, namespace, name string, in time.Duration) *
 }
 
 // expiredObject is the common case: an expiry an hour past.
-func expiredObject(rt ResourceType, namespace, name string) *unstructured.Unstructured {
+func expiredObject(rt resourceType, namespace, name string) *unstructured.Unstructured {
 	return expiringObject(rt, namespace, name, -time.Hour)
 }
 
 // resourceExists reports whether the janitor's cluster still holds the resource.
-func resourceExists(t *testing.T, j *Janitor, rt ResourceType, namespace, name string) bool {
+func resourceExists(t *testing.T, j *Janitor, rt resourceType, namespace, name string) bool {
 	t.Helper()
 
 	_, err := j.cluster.Dynamic.Resource(rt.gvr()).Namespace(namespace).
@@ -230,7 +230,7 @@ func TestCleanUp(t *testing.T) {
 				pods = append(pods, expiredObject(podResourceType, namespace, name))
 			}
 
-			j := newRunFixture(t, cfg, clusterFixture{types: []ResourceType{podResourceType}, objects: pods})
+			j := newRunFixture(t, cfg, clusterFixture{types: []resourceType{podResourceType}, objects: pods})
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
@@ -267,7 +267,7 @@ func TestCleanUpReportsThroughTheLoggerItWasGiven(t *testing.T) {
 	cfg.LogFormat = "%(levelname)s %(message)s"
 
 	j := newRunFixture(t, cfg, clusterFixture{
-		types:   []ResourceType{podResourceType},
+		types:   []resourceType{podResourceType},
 		objects: []*unstructured.Unstructured{expiredObject(podResourceType, "staging", "web")},
 		out:     &said,
 	})
@@ -292,7 +292,7 @@ func TestCleanUpDeletesAnIrregularlyPluralisedResource(t *testing.T) {
 	cfg.IncludeResources = []string{"ingresses"}
 
 	j := newRunFixture(t, cfg, clusterFixture{
-		types:   []ResourceType{ingressResourceType},
+		types:   []resourceType{ingressResourceType},
 		objects: []*unstructured.Unstructured{expiredObject(ingressResourceType, "staging", "web")},
 	})
 
@@ -317,7 +317,7 @@ func TestCleanUpActsOnANamespaceOnce(t *testing.T) {
 	cfg.DeleteNotification = int(time.Hour.Seconds())
 
 	j := newRunFixture(t, cfg, clusterFixture{
-		types:      []ResourceType{namespaceResourceType},
+		types:      []resourceType{namespaceResourceType},
 		namespaces: []string{"pr-42"},
 		objects: []*unstructured.Unstructured{
 			expiringObject(namespaceResourceType, "", "pr-42", 30*time.Minute),
@@ -343,7 +343,7 @@ func TestCleanUpDeletesANamespaceWithoutClusterResources(t *testing.T) {
 	cfg := newConfig()
 
 	j := newRunFixture(t, cfg, clusterFixture{
-		types:      []ResourceType{namespaceResourceType},
+		types:      []resourceType{namespaceResourceType},
 		namespaces: []string{"pr-42"},
 		objects: []*unstructured.Unstructured{
 			expiredObject(namespaceResourceType, "", "pr-42"),
@@ -365,7 +365,7 @@ func TestCleanUpLeavesAnExcludedNamespaceAlone(t *testing.T) {
 	cfg := newConfig()
 
 	j := newRunFixture(t, cfg, clusterFixture{
-		types:      []ResourceType{namespaceResourceType},
+		types:      []resourceType{namespaceResourceType},
 		namespaces: []string{"pr-42", "kube-system"},
 		objects: []*unstructured.Unstructured{
 			expiredObject(namespaceResourceType, "", "pr-42"),
@@ -396,7 +396,7 @@ func TestCleanUpReadsTheNamespaceListOnceToPlan(t *testing.T) {
 	cfg := newConfig()
 
 	j := newRunFixture(t, cfg, clusterFixture{
-		types:      []ResourceType{podResourceType, deploymentResourceType, ingressResourceType},
+		types:      []resourceType{podResourceType, deploymentResourceType, ingressResourceType},
 		namespaces: []string{"staging", "prod"},
 	})
 

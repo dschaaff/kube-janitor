@@ -6,10 +6,12 @@
 // run reaches the outside world through; and New puts them together into a
 // Janitor whose CleanUp performs one run.
 //
-// Those six are every package-level function the package exports. The rest of a
-// run — judging a Target, applying a Verdict, planning its Listings, reading the
-// cluster's Resource types — is unexported, so a reader can tell what the package
-// is meant to be entered through from what it is merely made of.
+// Those six functions, and the five types they pass and return, are what a
+// caller crosses. What a run does inside — judging a Target, applying a Verdict,
+// planning its Listings, reading the cluster's Resource types — is unexported,
+// so a reader can tell what the package is meant to be entered through from what
+// it is merely made of. surface_test.go pins the whole exported list, and words
+// the reason for every name on it that a caller cannot reach.
 package janitor
 
 import (
@@ -152,25 +154,25 @@ func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[stri
 
 	now := time.Now()
 
-	verdict, err := decide(t, j.config, now, func() map[string]interface{} {
+	v, err := decide(t, j.config, now, func() map[string]interface{} {
 		return j.resourceContext(ctx, t)
 	})
 	if err != nil {
 		return err
 	}
 
-	if verdict.Action == ActionNone {
-		j.log.Debugf("%s: nothing to do (%s)", t.describe(), verdict.Source)
+	if v.Action == actionNone {
+		j.log.Debugf("%s: nothing to do (%s)", t.describe(), v.Source)
 	} else {
-		j.log.Infof("%s: %s, deadline %s (%s)", t.describe(), verdict.Action,
-			verdict.Deadline.Format(time.RFC3339), verdict.Source)
+		j.log.Infof("%s: %s, deadline %s (%s)", t.describe(), v.Action,
+			v.Deadline.Format(time.RFC3339), v.Source)
 	}
 
-	if err := j.apply(ctx, t, verdict, now); err != nil {
+	if err := j.apply(ctx, t, v, now); err != nil {
 		return err
 	}
 
-	if verdict.Action == ActionDelete {
+	if v.Action == actionDelete {
 		counter[t.plural()+"-deleted"]++
 	}
 

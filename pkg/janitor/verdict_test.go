@@ -59,14 +59,14 @@ func mustRules(t *testing.T, rules ...Rule) []Rule {
 }
 
 func TestActionString(t *testing.T) {
-	for action, want := range map[Action]string{
-		ActionNone:   "none",
-		ActionDelete: "delete",
-		ActionNotify: "notify",
-		Action(99):   "none",
+	for a, want := range map[action]string{
+		actionNone:   "none",
+		actionDelete: "delete",
+		actionNotify: "notify",
+		action(99):   "none",
 	} {
-		if got := action.String(); got != want {
-			t.Errorf("Action(%d).String() = %q, want %q", action, got, want)
+		if got := a.String(); got != want {
+			t.Errorf("action(%d).String() = %q, want %q", a, got, want)
 		}
 	}
 }
@@ -80,69 +80,69 @@ func TestDecideAction(t *testing.T) {
 		name       string
 		target     Target
 		cfg        *Config
-		wantAction Action
+		wantAction action
 		wantSource string
 	}{
 		{
 			name:       "no annotations and no rules",
 			target:     pod(t, time.Hour, nil),
 			cfg:        &Config{},
-			wantAction: ActionNone,
+			wantAction: actionNone,
 		},
 		{
 			name:       "expiry in the past deletes",
 			target:     pod(t, 0, map[string]string{ExpiryAnnotation: "2026-05-01T00:00:00Z"}),
 			cfg:        &Config{},
-			wantAction: ActionDelete,
+			wantAction: actionDelete,
 			wantSource: "annotation " + ExpiryAnnotation,
 		},
 		{
 			name:       "expiry in the future waits",
 			target:     pod(t, 0, map[string]string{ExpiryAnnotation: "2026-07-01T00:00:00Z"}),
 			cfg:        &Config{},
-			wantAction: ActionNone,
+			wantAction: actionNone,
 			wantSource: "annotation " + ExpiryAnnotation,
 		},
 		{
 			name:       "date-only expiry is midnight UTC",
 			target:     pod(t, 0, map[string]string{ExpiryAnnotation: "2026-05-31"}),
 			cfg:        &Config{},
-			wantAction: ActionDelete,
+			wantAction: actionDelete,
 			wantSource: "annotation " + ExpiryAnnotation,
 		},
 		{
 			name:       "ttl older than the resource deletes",
 			target:     pod(t, 2*time.Hour, map[string]string{TTLAnnotation: "1h"}),
 			cfg:        &Config{},
-			wantAction: ActionDelete,
+			wantAction: actionDelete,
 			wantSource: "annotation " + TTLAnnotation,
 		},
 		{
 			name:       "ttl not yet reached waits",
 			target:     pod(t, 30*time.Minute, map[string]string{TTLAnnotation: "1h"}),
 			cfg:        &Config{},
-			wantAction: ActionNone,
+			wantAction: actionNone,
 			wantSource: "annotation " + TTLAnnotation,
 		},
 		{
 			name:       "unlimited ttl is never deleted",
 			target:     pod(t, 10000*time.Hour, map[string]string{TTLAnnotation: TTLUnlimited}),
 			cfg:        &Config{},
-			wantAction: ActionNone,
+			wantAction: actionNone,
 			wantSource: "annotation " + TTLAnnotation,
 		},
 		{
 			name:       "notification window reached",
 			target:     pod(t, 55*time.Minute, map[string]string{TTLAnnotation: "1h"}),
 			cfg:        &Config{DeleteNotification: 600},
-			wantAction: ActionNotify,
+			wantAction: actionNotify,
 			wantSource: "annotation " + TTLAnnotation,
 		},
 		{
 			name:       "notification window not yet reached",
 			target:     pod(t, 30*time.Minute, map[string]string{TTLAnnotation: "1h"}),
 			cfg:        &Config{DeleteNotification: 600},
-			wantAction: ActionNone,
+			wantAction: actionNone,
 			wantSource: "annotation " + TTLAnnotation,
 		},
 		{
@@ -152,21 +152,21 @@ func TestDecideAction(t *testing.T) {
 				NotifiedAnnotation: "yes",
 			}),
 			cfg:        &Config{DeleteNotification: 600},
-			wantAction: ActionNone,
+			wantAction: actionNone,
 			wantSource: "annotation " + TTLAnnotation,
 		},
 		{
 			name:       "notification is not sent when the deadline has passed",
 			target:     pod(t, 2*time.Hour, map[string]string{TTLAnnotation: "1h"}),
 			cfg:        &Config{DeleteNotification: 600},
-			wantAction: ActionDelete,
+			wantAction: actionDelete,
 			wantSource: "annotation " + TTLAnnotation,
 		},
 		{
 			name:       "matching rule deletes",
 			target:     pod(t, 2*time.Hour, nil),
 			cfg:        &Config{Rules: mustRules(t, matchAll("stale-pods", "1h"))},
-			wantAction: ActionDelete,
+			wantAction: actionDelete,
 			wantSource: "rule stale-pods",
 		},
 		{
@@ -176,7 +176,7 @@ func TestDecideAction(t *testing.T) {
 				matchAll("first", "1h"),
 				matchAll("second", "10m"),
 			)},
-			wantAction: ActionDelete,
+			wantAction: actionDelete,
 			wantSource: "rule first",
 		},
 		{
@@ -186,7 +186,7 @@ func TestDecideAction(t *testing.T) {
 				matchAll("keep", TTLUnlimited),
 				matchAll("reap", "1h"),
 			)},
-			wantAction: ActionDelete,
+			wantAction: actionDelete,
 			wantSource: "rule reap",
 		},
 		{
@@ -195,7 +195,7 @@ func TestDecideAction(t *testing.T) {
 			cfg: &Config{Rules: mustRules(t,
 				Rule{ID: "other", Resources: []string{"Deployments"}, JMESPath: "metadata.name", TTL: "1h"},
 			)},
-			wantAction: ActionNone,
+			wantAction: actionNone,
 		},
 	}
 
@@ -221,7 +221,7 @@ func TestDecidePrecedence(t *testing.T) {
 	tests := []struct {
 		name       string
 		target     Target
-		wantAction Action
+		wantAction action
 		wantSource string
 	}{
 		{
@@ -232,7 +232,7 @@ func TestDecidePrecedence(t *testing.T) {
 			}),
 			// The TTL alone would delete. The unexpired expiry annotation wins, so
 			// nothing happens.
-			wantAction: ActionNone,
+			wantAction: actionNone,
 			wantSource: "annotation " + ExpiryAnnotation,
 		},
 		{
@@ -241,7 +241,7 @@ func TestDecidePrecedence(t *testing.T) {
 				ExpiryAnnotation: "2026-05-01T00:00:00Z",
 				TTLAnnotation:    "1h",
 			}),
-			wantAction: ActionDelete,
+			wantAction: actionDelete,
 			wantSource: "annotation " + ExpiryAnnotation,
 		},
 		{
@@ -249,7 +249,7 @@ func TestDecidePrecedence(t *testing.T) {
 			target: pod(t, 30*time.Minute, map[string]string{
 				TTLAnnotation: "1h",
 			}),
-			wantAction: ActionNone,
+			wantAction: actionNone,
 			wantSource: "annotation " + TTLAnnotation,
 		},
 	}
@@ -300,8 +300,8 @@ func TestDecideAppliesRulesToUnannotatedResources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decide() error = %v", err)
 	}
-	if got.Action != ActionDelete {
-		t.Errorf("Action = %v, want %v", got.Action, ActionDelete)
+	if got.Action != actionDelete {
+		t.Errorf("Action = %v, want %v", got.Action, actionDelete)
 	}
 }
 
@@ -327,8 +327,8 @@ func TestDecideMatchesRulesAgainstNamespaces(t *testing.T) {
 		if err != nil {
 			t.Fatalf("decide() error = %v", err)
 		}
-		if got.Action != ActionDelete {
-			t.Errorf("resources %v: Action = %v, want %v", resources, got.Action, ActionDelete)
+		if got.Action != actionDelete {
+			t.Errorf("resources %v: action = %v, want %v", resources, got.Action, actionDelete)
 		}
 	}
 }
@@ -366,19 +366,19 @@ func TestDecideDeploymentTimeAnnotation(t *testing.T) {
 	tests := []struct {
 		name       string
 		deployedAt string
-		wantAction Action
+		wantAction action
 	}{
 		{
 			// Deployed recently, so a 1h TTL has not run out even though the
 			// resource itself is old.
 			name:       "annotation is used in place of the creation timestamp",
 			deployedAt: now.Add(-10 * time.Minute).Format(time.RFC3339),
-			wantAction: ActionNone,
+			wantAction: actionNone,
 		},
 		{
 			name:       "unparseable annotation falls back to the creation timestamp",
 			deployedAt: "yesterday",
-			wantAction: ActionDelete,
+			wantAction: actionDelete,
 		},
 	}
 
@@ -408,28 +408,28 @@ func TestDecideResolvesResourceContextLazily(t *testing.T) {
 		target     Target
 		cfg        *Config
 		wantCalls  int
-		wantAction Action
+		wantAction action
 	}{
 		{
 			name:       "ttl annotation short-circuits rule evaluation",
 			target:     pod(t, 2*time.Hour, map[string]string{TTLAnnotation: "1h"}),
 			cfg:        &Config{Rules: mustRules(t, Rule{ID: "r", Resources: []string{"*"}, JMESPath: "_context.reap", TTL: "1h"})},
 			wantCalls:  0,
-			wantAction: ActionDelete,
+			wantAction: actionDelete,
 		},
 		{
 			name:       "no rules configured needs no context",
 			target:     pod(t, 2*time.Hour, nil),
 			cfg:        &Config{},
 			wantCalls:  0,
-			wantAction: ActionNone,
+			wantAction: actionNone,
 		},
 		{
 			name:       "rules are evaluated against the context",
 			target:     pod(t, 2*time.Hour, nil),
 			cfg:        &Config{Rules: mustRules(t, Rule{ID: "r", Resources: []string{"*"}, JMESPath: "_context.reap", TTL: "1h"})},
 			wantCalls:  1,
-			wantAction: ActionDelete,
+			wantAction: actionDelete,
 		},
 	}
 
@@ -542,8 +542,8 @@ func TestDecideNamesTheClusterInANotification(t *testing.T) {
 		t.Fatalf("decide() error = %v", err)
 	}
 
-	if got.Action != ActionNotify {
-		t.Fatalf("Action = %v, want %v", got.Action, ActionNotify)
+	if got.Action != actionNotify {
+		t.Fatalf("Action = %v, want %v", got.Action, actionNotify)
 	}
 	if !strings.HasPrefix(got.Message, "[prod-eu] ") {
 		t.Errorf("Message = %q, want it to name the cluster", got.Message)
@@ -559,8 +559,8 @@ func TestDecideNamesNoClusterInADelete(t *testing.T) {
 		t.Fatalf("decide() error = %v", err)
 	}
 
-	if got.Action != ActionDelete {
-		t.Fatalf("Action = %v, want %v", got.Action, ActionDelete)
+	if got.Action != actionDelete {
+		t.Fatalf("Action = %v, want %v", got.Action, actionDelete)
 	}
 	if strings.Contains(got.Message, "prod-eu") {
 		t.Errorf("Message = %q, want no cluster name on a delete", got.Message)

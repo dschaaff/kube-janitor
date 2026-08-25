@@ -13,34 +13,34 @@ import (
 // The Resource types fixtures are listed as. ingressResourceType is the one the
 // irregular-plural cases turn on.
 var (
-	podResourceType = ResourceType{
+	podResourceType = resourceType{
 		Version: "v1", Kind: "Pod", Plural: "pods", Namespaced: true,
 	}
-	deploymentResourceType = ResourceType{
+	deploymentResourceType = resourceType{
 		Group: "apps", Version: "v1", Kind: "Deployment", Plural: "deployments", Namespaced: true,
 	}
-	ingressResourceType = ResourceType{
+	ingressResourceType = resourceType{
 		Group: "networking.k8s.io", Version: "v1", Kind: "Ingress", Plural: "ingresses", Namespaced: true,
 	}
-	networkPolicyResourceType = ResourceType{
+	networkPolicyResourceType = resourceType{
 		Group: "networking.k8s.io", Version: "v1", Kind: "NetworkPolicy",
 		Plural: "networkpolicies", Namespaced: true,
 	}
 	// namespaceResourceType is how discovery reports namespaces: cluster-scoped,
 	// and listed through the "namespaces" plural.
-	namespaceResourceType = ResourceType{
+	namespaceResourceType = resourceType{
 		Version: "v1", Kind: "Namespace", Plural: "namespaces",
 	}
 	// persistentVolumeResourceType is a cluster-scoped type with no standing of
 	// its own, so it is the one --include-cluster-resources gates.
-	persistentVolumeResourceType = ResourceType{
+	persistentVolumeResourceType = resourceType{
 		Version: "v1", Kind: "PersistentVolume", Plural: "persistentvolumes",
 	}
 )
 
 // resourceObject is the unstructured form a resource arrives in. A cluster-scoped
 // one carries no namespace.
-func resourceObject(rt ResourceType, namespace, name string) *unstructured.Unstructured {
+func resourceObject(rt resourceType, namespace, name string) *unstructured.Unstructured {
 	metadata := map[string]interface{}{"name": name}
 	if namespace != "" {
 		metadata["namespace"] = namespace
@@ -56,7 +56,7 @@ func resourceObject(rt ResourceType, namespace, name string) *unstructured.Unstr
 // mustTarget builds a Target the way a run does, from the unstructured form the
 // dynamic client returns. A fixture written as a typed object is converted
 // first, because that is the only form newTarget takes.
-func mustTarget(t *testing.T, obj metav1.Object, rt ResourceType) Target {
+func mustTarget(t *testing.T, obj metav1.Object, rt resourceType) Target {
 	t.Helper()
 
 	if u, ok := obj.(*unstructured.Unstructured); ok {
@@ -161,7 +161,7 @@ func TestNewTargetFromNamespace(t *testing.T) {
 // itself fails here too.
 func TestNewTargetCarriesTheListedResourceType(t *testing.T) {
 	tests := []struct {
-		rt             ResourceType
+		rt             resourceType
 		wantGVR        schema.GroupVersionResource
 		wantAPIVersion string
 	}{
