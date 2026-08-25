@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/dschaaff/kube-janitor/pkg/janitor"
@@ -43,26 +42,13 @@ func main() {
 		logger.Infof("Running in dry-run mode")
 	}
 
-	// Check for KUBECONFIG environment variable
-	if os.Getenv("KUBECONFIG") == "" {
-		homeDir, err := os.UserHomeDir()
-		if err == nil {
-			defaultKubeconfig := filepath.Join(homeDir, ".kube", "config")
-			if _, err := os.Stat(defaultKubeconfig); err == nil {
-				logger.Infof("KUBECONFIG not set, using default: %s", defaultKubeconfig)
-			} else {
-				logger.Warnf("KUBECONFIG not set and default config not found at %s", defaultKubeconfig)
-			}
-		}
-	} else {
-		logger.Infof("Using KUBECONFIG from environment: %s", os.Getenv("KUBECONFIG"))
-	}
-
-	cluster, err := janitor.Connect()
+	cluster, credentials, err := janitor.Connect()
 	if err != nil {
 		logger.Errorf("Failed to connect to cluster: %v", err)
 		os.Exit(1)
 	}
+
+	logger.Infof("Connected using %s", credentials)
 
 	j := janitor.New(config, cluster, logger, janitor.NewNotifier(config))
 

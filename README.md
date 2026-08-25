@@ -215,6 +215,14 @@ in. When set, delete notifications are prefixed with `[name]`, in both
 the Kubernetes event and the webhook payload, so notifications from
 several clusters can be told apart.
 
+`KUBECONFIG`
+
+: Optional: environment variable naming the kubeconfig a run connects
+with when it is not running as a pod. A run inside a cluster uses its
+service account and ignores this. Outside one, a run falls back to
+`~/.kube/config` when this is unset. A run says at startup which
+credentials it connected with.
+
 `RESOURCE_CONTEXT_HOOK`
 
 : Optional: environment variable naming a built-in hook that
