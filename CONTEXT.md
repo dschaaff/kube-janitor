@@ -122,8 +122,11 @@ _Avoid_: Logger (the name of the thing, not of the module), output, printer
 
 **Connect**:
 The module that resolves the ambient credentials and returns the Cluster they
-grant. A run is handed a Cluster and never builds one, so the whole of a run can
-be exercised against fakes.
+grant, along with the name of the credentials it used. It is the only thing that
+knows the order the credentials are looked for in, so nothing else works that
+order out again in order to say which ones a run is working through. A run is
+handed a Cluster and never builds one, so the whole of a run can be exercised
+against fakes.
 _Avoid_: Client factory, bootstrap, initialise
 
 **Load**:
