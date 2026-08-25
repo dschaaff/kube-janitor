@@ -122,7 +122,6 @@ func (j *Janitor) getPVCContext(ctx context.Context, t Target) (*ResourceContext
 	return &ResourceContext{
 		PVCIsNotMounted:    !isMounted,
 		PVCIsNotReferenced: !isReferenced,
-		Cache:              j.cache,
 	}, nil
 }
 

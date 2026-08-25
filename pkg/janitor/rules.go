@@ -35,7 +35,7 @@ func (r *Rule) ValidateAndCompile() error {
 	}
 
 	// Validate TTL format
-	if _, err := ParseTTL(r.TTL); err != nil {
+	if _, err := parseTTL(r.TTL); err != nil {
 		return fmt.Errorf("invalid TTL %q in rule %s: %v", r.TTL, r.ID, err)
 	}
 
@@ -92,8 +92,8 @@ func (r *Rule) Matches(t Target, context map[string]interface{}) bool {
 	}
 }
 
-// LoadRules loads rules from a YAML file
-func LoadRules(filename string) ([]Rule, error) {
+// loadRules loads rules from a YAML file
+func loadRules(filename string) ([]Rule, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read rules file: %v", err)

@@ -175,18 +175,18 @@ rules:
 	path := writeRulesFile(t, content)
 
 	// Test loading rules
-	rules, err := LoadRules(path)
+	rules, err := loadRules(path)
 	if err != nil {
-		t.Fatalf("LoadRules() error = %v", err)
+		t.Fatalf("loadRules() error = %v", err)
 	}
 
 	if len(rules) != 2 {
-		t.Errorf("LoadRules() got %d rules, want 2", len(rules))
+		t.Errorf("loadRules() got %d rules, want 2", len(rules))
 	}
 
 	// Test loading invalid file
-	_, err = LoadRules("nonexistent.yaml")
+	_, err = loadRules("nonexistent.yaml")
 	if err == nil {
-		t.Error("LoadRules() expected error for nonexistent file")
+		t.Error("loadRules() expected error for nonexistent file")
 	}
 }

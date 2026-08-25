@@ -291,7 +291,7 @@ func (c *Config) loadRules() error {
 		return nil
 	}
 
-	rules, err := LoadRules(c.RulesFile)
+	rules, err := loadRules(c.RulesFile)
 	if err != nil {
 		return fmt.Errorf("failed to load rules: %w", err)
 	}

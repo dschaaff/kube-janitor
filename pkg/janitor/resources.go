@@ -34,8 +34,8 @@ func (rt ResourceType) gvr() schema.GroupVersionResource {
 	return rt.groupVersion().WithResource(rt.Plural)
 }
 
-// GetResourceTypes returns all available resource types in the cluster
-func GetResourceTypes(client kubernetes.Interface) ([]ResourceType, error) {
+// getResourceTypes returns all available resource types in the cluster
+func getResourceTypes(client kubernetes.Interface) ([]ResourceType, error) {
 	resourceTypesMap := make(map[string]ResourceType)
 
 	// Get server resources for core API group

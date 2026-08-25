@@ -9,12 +9,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Apply carries out a Verdict against the cluster. It is the only place that
+// apply carries out a Verdict against the cluster. It is the only place that
 // writes: everything that decides what should happen lives behind Decide.
 //
 // now is the same instant the verdict was reached, so a resource's event
 // timestamps line up with the decision that produced them.
-func (j *Janitor) Apply(ctx context.Context, t Target, v Verdict, now time.Time) error {
+func (j *Janitor) apply(ctx context.Context, t Target, v Verdict, now time.Time) error {
 	switch v.Action {
 	case ActionDelete:
 		if err := j.createEvent(ctx, t, v.Message, v.EventReason, now); err != nil {

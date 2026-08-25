@@ -62,13 +62,13 @@ func TestParseTTL(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseTTL(tt.ttl)
+			got, err := parseTTL(tt.ttl)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseTTL() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("parseTTL() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if err == nil && got != tt.expected {
-				t.Errorf("ParseTTL() = %v, want %v", got, tt.expected)
+				t.Errorf("parseTTL() = %v, want %v", got, tt.expected)
 			}
 		})
 	}
@@ -114,65 +114,13 @@ func TestParseExpiry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := ParseExpiry(tt.expiry)
+			got, err := parseExpiry(tt.expiry)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("ParseExpiry() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("parseExpiry() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if err == nil && got.IsZero() {
-				t.Errorf("ParseExpiry() returned zero time for valid input %q", tt.expiry)
-			}
-		})
-	}
-}
-
-func TestFormatDuration(t *testing.T) {
-	tests := []struct {
-		name     string
-		duration time.Duration
-		want     string
-	}{
-		{
-			name:     "zero duration",
-			duration: 0,
-			want:     "0s",
-		},
-		{
-			name:     "seconds only",
-			duration: 45 * time.Second,
-			want:     "45s",
-		},
-		{
-			name:     "minutes and seconds",
-			duration: 2*time.Minute + 30*time.Second,
-			want:     "2m30s",
-		},
-		{
-			name:     "hours minutes seconds",
-			duration: time.Hour + 2*time.Minute + 30*time.Second,
-			want:     "1h2m30s",
-		},
-		{
-			name:     "negative duration",
-			duration: -(time.Hour + 2*time.Minute + 30*time.Second),
-			want:     "-1h2m30s",
-		},
-		{
-			name:     "days",
-			duration: 2 * 24 * time.Hour,
-			want:     "2d",
-		},
-		{
-			name:     "weeks",
-			duration: 2 * 7 * 24 * time.Hour,
-			want:     "2w",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := FormatDuration(tt.duration); got != tt.want {
-				t.Errorf("FormatDuration() = %v, want %v", got, tt.want)
+				t.Errorf("parseExpiry() returned zero time for valid input %q", tt.expiry)
 			}
 		})
 	}

@@ -201,9 +201,9 @@ func TestDecideAction(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Decide(tt.target, tt.cfg, now, nil)
+			got, err := decide(tt.target, tt.cfg, now, nil)
 			if err != nil {
-				t.Fatalf("Decide() error = %v", err)
+				t.Fatalf("decide() error = %v", err)
 			}
 			if got.Action != tt.wantAction {
 				t.Errorf("Action = %v, want %v", got.Action, tt.wantAction)
@@ -260,9 +260,9 @@ func TestDecidePrecedence(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Decide(tt.target, &Config{Rules: rules}, now, nil)
+			got, err := decide(tt.target, &Config{Rules: rules}, now, nil)
 			if err != nil {
-				t.Fatalf("Decide() error = %v", err)
+				t.Fatalf("decide() error = %v", err)
 			}
 			if got.Action != tt.wantAction {
 				t.Errorf("Action = %v, want %v", got.Action, tt.wantAction)
@@ -296,9 +296,9 @@ func TestDecideAppliesRulesToUnannotatedResources(t *testing.T) {
 		ID: "unlabelled", Resources: []string{"*"}, JMESPath: "metadata.name", TTL: "1h",
 	})}
 
-	got, err := Decide(target, cfg, now, nil)
+	got, err := decide(target, cfg, now, nil)
 	if err != nil {
-		t.Fatalf("Decide() error = %v", err)
+		t.Fatalf("decide() error = %v", err)
 	}
 	if got.Action != ActionDelete {
 		t.Errorf("Action = %v, want %v", got.Action, ActionDelete)
@@ -323,9 +323,9 @@ func TestDecideMatchesRulesAgainstNamespaces(t *testing.T) {
 			JMESPath: "starts_with(metadata.name, 'pr-')", TTL: "1h",
 		})}
 
-		got, err := Decide(target, cfg, now, nil)
+		got, err := decide(target, cfg, now, nil)
 		if err != nil {
-			t.Fatalf("Decide() error = %v", err)
+			t.Fatalf("decide() error = %v", err)
 		}
 		if got.Action != ActionDelete {
 			t.Errorf("resources %v: Action = %v, want %v", resources, got.Action, ActionDelete)
@@ -353,8 +353,8 @@ func TestDecideInvalidValues(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := Decide(tt.target, tt.cfg, now, nil); err == nil {
-				t.Error("Decide() error = nil, want an error")
+			if _, err := decide(tt.target, tt.cfg, now, nil); err == nil {
+				t.Error("decide() error = nil, want an error")
 			}
 		})
 	}
@@ -389,9 +389,9 @@ func TestDecideDeploymentTimeAnnotation(t *testing.T) {
 				"deployed-at": tt.deployedAt,
 			})
 
-			got, err := Decide(target, cfg, now, nil)
+			got, err := decide(target, cfg, now, nil)
 			if err != nil {
-				t.Fatalf("Decide() error = %v", err)
+				t.Fatalf("decide() error = %v", err)
 			}
 			if got.Action != tt.wantAction {
 				t.Errorf("Action = %v, want %v", got.Action, tt.wantAction)
@@ -441,9 +441,9 @@ func TestDecideResolvesResourceContextLazily(t *testing.T) {
 				return map[string]interface{}{"reap": true}
 			}
 
-			got, err := Decide(tt.target, tt.cfg, now, contextFn)
+			got, err := decide(tt.target, tt.cfg, now, contextFn)
 			if err != nil {
-				t.Fatalf("Decide() error = %v", err)
+				t.Fatalf("decide() error = %v", err)
 			}
 			if calls != tt.wantCalls {
 				t.Errorf("resource context resolved %d times, want %d", calls, tt.wantCalls)
@@ -518,9 +518,9 @@ func TestDecideMessages(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := Decide(tt.target, tt.cfg, now, nil)
+			got, err := decide(tt.target, tt.cfg, now, nil)
 			if err != nil {
-				t.Fatalf("Decide() error = %v", err)
+				t.Fatalf("decide() error = %v", err)
 			}
 			if got.EventReason != tt.wantEventReason {
 				t.Errorf("EventReason = %q, want %q", got.EventReason, tt.wantEventReason)
@@ -537,9 +537,9 @@ func TestDecideMessages(t *testing.T) {
 func TestDecideNamesTheClusterInANotification(t *testing.T) {
 	target := pod(t, 55*time.Minute, map[string]string{TTLAnnotation: "1h"})
 
-	got, err := Decide(target, &Config{DeleteNotification: 600, ContextName: "prod-eu"}, now, nil)
+	got, err := decide(target, &Config{DeleteNotification: 600, ContextName: "prod-eu"}, now, nil)
 	if err != nil {
-		t.Fatalf("Decide() error = %v", err)
+		t.Fatalf("decide() error = %v", err)
 	}
 
 	if got.Action != ActionNotify {
@@ -554,9 +554,9 @@ func TestDecideNamesTheClusterInANotification(t *testing.T) {
 func TestDecideNamesNoClusterInADelete(t *testing.T) {
 	target := pod(t, 2*time.Hour, map[string]string{TTLAnnotation: "1h"})
 
-	got, err := Decide(target, &Config{DeleteNotification: 600, ContextName: "prod-eu"}, now, nil)
+	got, err := decide(target, &Config{DeleteNotification: 600, ContextName: "prod-eu"}, now, nil)
 	if err != nil {
-		t.Fatalf("Decide() error = %v", err)
+		t.Fatalf("decide() error = %v", err)
 	}
 
 	if got.Action != ActionDelete {
