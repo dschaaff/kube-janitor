@@ -1,14 +1,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/dschaaff/kube-janitor/pkg/janitor"
-	"github.com/dschaaff/kube-janitor/pkg/janitor/shutdown"
 )
 
 var (
@@ -52,18 +54,49 @@ func main() {
 
 	j := janitor.New(config, cluster, logger, janitor.NewNotifier(config))
 
-	// Set up context with cancellation and signal handling
-	ctx, gs := shutdown.ShutdownWithContext()
+	// A run stops when the process is asked to stop. The first signal cancels the
+	// context every cleanup is given, and CleanUp checks it between listings and
+	// between targets, so a cancelled run stops there rather than working through
+	// the rest of the cluster.
+	//
+	// A write already under way is not unwound: a delete cancelled after its event
+	// was recorded leaves the event behind, and the next run judges the resource
+	// again.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
-	// Set safe to exit when we're done with cleanup
-	defer gs.SetSafeToExit(true)
+	// Handling a signal only makes sense once. Giving the signals back to their
+	// default disposition as soon as the first arrives means a later one ends the
+	// process outright, rather than reaching a channel nothing reads any more.
+	//
+	// This narrows the window rather than closing it. A signal arriving in the
+	// moment between the cancellation and the handlers coming off is still
+	// dropped, so a second signal is a good way to end a stuck run but not a
+	// guaranteed one.
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
 
 	if config.Once {
 		startTime := time.Now()
-		if err := j.CleanUp(ctx); err != nil {
+		err := j.CleanUp(ctx)
+
+		// A run that was asked to stop did not fail. Whether CleanUp reports the
+		// cancellation at all depends on where it landed — listing the namespaces
+		// returns it, a later listing logs it and carries on — so the context
+		// settles this rather than the error, and a signalled run always ends the
+		// same way.
+		if ctx.Err() != nil {
+			logger.Infof("Signal received, winding down")
+			return
+		}
+
+		if err != nil {
 			logger.Errorf("Error during cleanup: %v", err)
 			os.Exit(1)
 		}
+
 		logger.Infof("Cleanup completed in %v", time.Since(startTime))
 		return
 	}
@@ -75,8 +108,17 @@ func main() {
 	for {
 		select {
 		case <-ctx.Done():
+			logger.Infof("Signal received, winding down")
 			return
 		case <-ticker.C:
+			// A tick landing in the same moment as the signal leaves both cases
+			// ready, and select picks between them at random. Discovery takes no
+			// context, so a run started here would reach the cluster before
+			// anything could stop it.
+			if ctx.Err() != nil {
+				continue
+			}
+
 			startTime := time.Now()
 			if err := j.CleanUp(ctx); err != nil {
 				logger.Errorf("Error during cleanup: %v", err)
