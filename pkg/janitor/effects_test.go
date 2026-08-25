@@ -72,8 +72,8 @@ func TestApplyDelete(t *testing.T) {
 		Message:     "Pod staging/web expired and will be deleted",
 	}
 
-	if err := f.janitor.Apply(context.Background(), f.target, verdict, now); err != nil {
-		t.Fatalf("Apply() error = %v", err)
+	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+		t.Fatalf("apply() error = %v", err)
 	}
 
 	if got := f.events(t); len(got) != 1 || got[0] != "TTLExpired" {
@@ -87,8 +87,8 @@ func TestApplyDelete(t *testing.T) {
 func TestApplyNone(t *testing.T) {
 	f := newEffectsFixture(t, &Config{})
 
-	if err := f.janitor.Apply(context.Background(), f.target, Verdict{Action: ActionNone}, now); err != nil {
-		t.Fatalf("Apply() error = %v", err)
+	if err := f.janitor.apply(context.Background(), f.target, Verdict{Action: ActionNone}, now); err != nil {
+		t.Fatalf("apply() error = %v", err)
 	}
 
 	if got := f.events(t); len(got) != 0 {
@@ -108,8 +108,8 @@ func TestApplyDryRunWritesNothing(t *testing.T) {
 		Message:     "Pod staging/web expired and will be deleted",
 	}
 
-	if err := f.janitor.Apply(context.Background(), f.target, verdict, now); err != nil {
-		t.Fatalf("Apply() error = %v", err)
+	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+		t.Fatalf("apply() error = %v", err)
 	}
 
 	if got := f.events(t); len(got) != 0 {
@@ -126,8 +126,8 @@ func TestApplyStampsEventsWithTheDecisionTime(t *testing.T) {
 	f := newEffectsFixture(t, &Config{})
 
 	verdict := Verdict{Action: ActionDelete, EventReason: "TTLExpired", Message: "gone"}
-	if err := f.janitor.Apply(context.Background(), f.target, verdict, now); err != nil {
-		t.Fatalf("Apply() error = %v", err)
+	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+		t.Fatalf("apply() error = %v", err)
 	}
 
 	list, err := f.janitor.cluster.Typed.CoreV1().Events("staging").List(context.Background(), metav1.ListOptions{})
@@ -161,8 +161,8 @@ func TestApplyNotify(t *testing.T) {
 		Message:     "Pod staging/web will be deleted at some point (TTL 1h)",
 	}
 
-	if err := f.janitor.Apply(context.Background(), f.target, verdict, now); err != nil {
-		t.Fatalf("Apply() error = %v", err)
+	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+		t.Fatalf("apply() error = %v", err)
 	}
 
 	if got := f.events(t); len(got) != 1 || got[0] != "DeleteNotification" {
@@ -194,8 +194,8 @@ func TestApplyNotifyReportsOneWording(t *testing.T) {
 		Message:     "[prod-eu] Pod staging/web will be deleted",
 	}
 
-	if err := f.janitor.Apply(context.Background(), f.target, verdict, now); err != nil {
-		t.Fatalf("Apply() error = %v", err)
+	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+		t.Fatalf("apply() error = %v", err)
 	}
 
 	if got := f.notifier.messages; len(got) != 1 || got[0] != verdict.Message {
@@ -220,8 +220,8 @@ func TestApplyNotifySurvivesDeliveryFailure(t *testing.T) {
 		Message:     "Pod staging/web will be deleted",
 	}
 
-	if err := f.janitor.Apply(context.Background(), f.target, verdict, now); err != nil {
-		t.Fatalf("Apply() error = %v, want the run to carry on", err)
+	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+		t.Fatalf("apply() error = %v, want the run to carry on", err)
 	}
 
 	if got := f.notifier.messages; len(got) != 1 {
@@ -248,8 +248,8 @@ func TestApplyNotifyDeliversNothingInDryRun(t *testing.T) {
 		Message:     "Pod staging/web will be deleted",
 	}
 
-	if err := f.janitor.Apply(context.Background(), f.target, verdict, now); err != nil {
-		t.Fatalf("Apply() error = %v", err)
+	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+		t.Fatalf("apply() error = %v", err)
 	}
 
 	if got := f.notifier.messages; len(got) != 0 {
@@ -266,11 +266,11 @@ func TestApplyWaitsAfterDelete(t *testing.T) {
 	verdict := Verdict{Action: ActionDelete, EventReason: "TTLExpired", Message: "gone"}
 
 	start := time.Now()
-	if err := f.janitor.Apply(context.Background(), f.target, verdict, now); err != nil {
-		t.Fatalf("Apply() error = %v", err)
+	if err := f.janitor.apply(context.Background(), f.target, verdict, now); err != nil {
+		t.Fatalf("apply() error = %v", err)
 	}
 
 	if elapsed := time.Since(start); elapsed < time.Second {
-		t.Errorf("Apply() returned after %v, want at least 1s", elapsed)
+		t.Errorf("apply() returned after %v, want at least 1s", elapsed)
 	}
 }

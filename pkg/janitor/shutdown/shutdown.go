@@ -65,19 +65,6 @@ func (gs *GracefulShutdown) Done() <-chan struct{} {
 	return gs.done
 }
 
-// NewContext creates a new context that will be canceled on shutdown signals
-func NewContext() context.Context {
-	ctx, cancel := context.WithCancel(context.Background())
-	gs := NewGracefulShutdown()
-
-	go func() {
-		<-gs.Done()
-		cancel()
-	}()
-
-	return ctx
-}
-
 // ShutdownWithContext creates a context that will be canceled on shutdown signals
 // and returns the GracefulShutdown instance for additional control
 func ShutdownWithContext() (context.Context, *GracefulShutdown) {

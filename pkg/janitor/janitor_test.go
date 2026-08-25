@@ -95,7 +95,7 @@ func events(t *testing.T, j *Janitor) []*corev1.Event {
 }
 
 // discoveryFor reports the given types, grouped the way a real API server groups
-// them. GetResourceTypes asks for the core group first, so a "v1" list is always
+// them. getResourceTypes asks for the core group first, so a "v1" list is always
 // present even when no core-group type is fixtured.
 func discoveryFor(types []ResourceType) []*metav1.APIResourceList {
 	byGroupVersion := map[string]*metav1.APIResourceList{}

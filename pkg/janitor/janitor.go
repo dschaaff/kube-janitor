@@ -1,3 +1,15 @@
+// Package janitor deletes Kubernetes resources once they are no longer wanted.
+//
+// A command builds one process out of it: LoadConfig settles the Configuration —
+// or, when the run only asked for -help, Usage writes the options one accepts;
+// Connect resolves the Cluster; NewLogger and NewNotifier make the two places a
+// run reaches the outside world through; and New puts them together into a
+// Janitor whose CleanUp performs one run.
+//
+// Those six are every package-level function the package exports. The rest of a
+// run — judging a Target, applying a Verdict, planning its Listings, reading the
+// cluster's Resource types — is unexported, so a reader can tell what the package
+// is meant to be entered through from what it is merely made of.
 package janitor
 
 import (
@@ -42,7 +54,7 @@ func New(config *Config, cluster Cluster, log *Logger, notifier Notifier) *Janit
 func (j *Janitor) CleanUp(ctx context.Context) error {
 	j.log.Debugf("Starting cleanup run")
 
-	resourceTypes, err := GetResourceTypes(j.cluster.Typed)
+	resourceTypes, err := getResourceTypes(j.cluster.Typed)
 	if err != nil {
 		return fmt.Errorf("failed to get resource types: %v", err)
 	}
@@ -140,7 +152,7 @@ func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[stri
 
 	now := time.Now()
 
-	verdict, err := Decide(t, j.config, now, func() map[string]interface{} {
+	verdict, err := decide(t, j.config, now, func() map[string]interface{} {
 		return j.resourceContext(ctx, t)
 	})
 	if err != nil {
@@ -154,7 +166,7 @@ func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[stri
 			verdict.Deadline.Format(time.RFC3339), verdict.Source)
 	}
 
-	if err := j.Apply(ctx, t, verdict, now); err != nil {
+	if err := j.apply(ctx, t, verdict, now); err != nil {
 		return err
 	}
 

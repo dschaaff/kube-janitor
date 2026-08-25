@@ -55,7 +55,7 @@ type Verdict struct {
 	Message string
 }
 
-// Decide works out what should happen to a target.
+// decide works out what should happen to a target.
 //
 // A target has at most one Deadline, taken from the first source that supplies
 // one: the expiry annotation, then the TTL annotation, then the first matching
@@ -63,7 +63,7 @@ type Verdict struct {
 //
 // resourceContext is only called if rule evaluation is reached, because building
 // it costs several cluster reads. It may be nil.
-func Decide(t Target, cfg *Config, now time.Time, resourceContext func() map[string]interface{}) (Verdict, error) {
+func decide(t Target, cfg *Config, now time.Time, resourceContext func() map[string]interface{}) (Verdict, error) {
 	if expiry, ok := t.Annotations[ExpiryAnnotation]; ok {
 		return decideFromExpiry(t, cfg, now, expiry)
 	}
@@ -76,7 +76,7 @@ func Decide(t Target, cfg *Config, now time.Time, resourceContext func() map[str
 }
 
 func decideFromExpiry(t Target, cfg *Config, now time.Time, expiry string) (Verdict, error) {
-	deadline, err := ParseExpiry(expiry)
+	deadline, err := parseExpiry(expiry)
 	if err != nil {
 		return Verdict{}, fmt.Errorf("invalid expiry value: %v", err)
 	}
@@ -91,7 +91,7 @@ func decideFromExpiry(t Target, cfg *Config, now time.Time, expiry string) (Verd
 }
 
 func decideFromTTL(t Target, cfg *Config, now time.Time, ttl string) (Verdict, error) {
-	lifetime, err := ParseTTL(ttl)
+	lifetime, err := parseTTL(ttl)
 	if err != nil {
 		return Verdict{}, fmt.Errorf("invalid TTL value: %v", err)
 	}
@@ -127,7 +127,7 @@ func decideFromRules(t Target, cfg *Config, now time.Time, resourceContext func(
 			continue
 		}
 
-		lifetime, err := ParseTTL(rule.TTL)
+		lifetime, err := parseTTL(rule.TTL)
 		if err != nil {
 			return Verdict{}, fmt.Errorf("invalid TTL in rule %s: %v", rule.ID, err)
 		}
