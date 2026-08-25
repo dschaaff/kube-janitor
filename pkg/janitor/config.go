@@ -51,7 +51,7 @@ type Config struct {
 
 	// Additional configuration
 	Rules               []Rule
-	ResourceContextHook ResourceContextHook
+	ResourceContextHook hooks.ResourceContextHook
 }
 
 // newConfig returns the configuration a run uses when nothing overrides it. It
@@ -181,7 +181,7 @@ func (c *Config) resolveHook(name string) error {
 		return fmt.Errorf("failed to get resource context hook: %w", err)
 	}
 
-	c.ResourceContextHook = ResourceContextHook(hook)
+	c.ResourceContextHook = hook
 	return nil
 }
 

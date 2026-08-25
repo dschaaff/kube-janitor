@@ -14,6 +14,15 @@ var (
 		"2006-01-02T15:04",
 		"2006-01-02",
 	}
+
+	// timeUnit is the unit a TTL's suffix names.
+	timeUnit = map[string]time.Duration{
+		"s": time.Second,
+		"m": time.Minute,
+		"h": time.Hour,
+		"d": 24 * time.Hour,
+		"w": 7 * 24 * time.Hour,
+	}
 )
 
 // parseTTL parses a TTL string into duration

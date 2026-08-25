@@ -415,3 +415,41 @@ func TestCleanUpReadsTheNamespaceListOnceToPlan(t *testing.T) {
 		t.Errorf("listed namespaces %d times, want 1", lists)
 	}
 }
+
+// TestCleanUpJudgesOnFactsInspectLookedUp covers the wiring a run reaches its
+// Resource context through: New builds the Inspect, and handleResource hands
+// Decide a way to reach it that Decide only calls once it gets as far as the
+// rules.
+//
+// A hook supplies the fact, because that needs nothing seeded in the cluster.
+// The rule is what proves the fact arrived: nothing else would delete this pod.
+func TestCleanUpJudgesOnFactsInspectLookedUp(t *testing.T) {
+	asked := 0
+
+	cfg := newConfig()
+	cfg.IncludeResources = []string{"pods"}
+	cfg.Rules = mustRules(t, Rule{
+		ID: "reap-it", Resources: []string{"pods"}, JMESPath: "_context.reap", TTL: "1h",
+	})
+	cfg.ResourceContextHook = func(resource interface{}, cache map[string]interface{}) map[string]interface{} {
+		asked++
+		return map[string]interface{}{"reap": true}
+	}
+
+	j := newRunFixture(t, cfg, clusterFixture{
+		types:   []ResourceType{podResourceType},
+		objects: []*unstructured.Unstructured{resourceObject(podResourceType, "default", "web")},
+	})
+
+	if err := j.CleanUp(context.Background()); err != nil {
+		t.Fatalf("CleanUp() error = %v", err)
+	}
+
+	if asked != 1 {
+		t.Errorf("the run looked its Resource context up %d times, want 1", asked)
+	}
+
+	if resourceExists(t, j, podResourceType, "default", "web") {
+		t.Error("pod default/web still exists, want the rule to have deleted it")
+	}
+}

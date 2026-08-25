@@ -27,7 +27,7 @@ type Janitor struct {
 	config   *Config
 	log      *Logger
 	notifier Notifier
-	cache    map[string]interface{}
+	inspect  *inspector
 }
 
 // New creates a Janitor that works through the given Cluster, reporting what it
@@ -37,13 +37,17 @@ type Janitor struct {
 // Everything a run reaches the outside world through is passed in rather than
 // built here: one process writes through one Logger, and the whole of a run can
 // be exercised against fakes.
+//
+// The Inspect a run looks its Resource context up through is built here rather
+// than passed, because nothing varies across it: it is made of the connections,
+// the hook and the Logger this already holds.
 func New(config *Config, cluster Cluster, log *Logger, notifier Notifier) *Janitor {
 	return &Janitor{
 		cluster:  cluster,
 		config:   config,
 		log:      log,
 		notifier: notifier,
-		cache:    make(map[string]interface{}),
+		inspect:  newInspector(cluster.Typed, config.ResourceContextHook, log),
 	}
 }
 
@@ -153,7 +157,7 @@ func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[stri
 	now := time.Now()
 
 	verdict, err := decide(t, j.config, now, func() map[string]interface{} {
-		return j.resourceContext(ctx, t)
+		return j.inspect.contextFor(ctx, t)
 	})
 	if err != nil {
 		return err
@@ -175,18 +179,6 @@ func (j *Janitor) handleResource(ctx context.Context, t Target, counter map[stri
 	}
 
 	return nil
-}
-
-// resourceContext resolves the cluster-derived facts rules can test. A lookup
-// failure degrades to an empty context rather than stopping the run, so a rule
-// that tests it simply does not match.
-func (j *Janitor) resourceContext(ctx context.Context, t Target) map[string]interface{} {
-	data, err := j.getResourceContext(ctx, t)
-	if err != nil {
-		j.log.Warnf("failed to get context for %s: %v", t.describe(), err)
-		return map[string]interface{}{}
-	}
-	return data
 }
 
 // logCleanupSummary reports what the run did. The Logger decides which of these

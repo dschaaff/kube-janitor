@@ -86,6 +86,14 @@ event, but the two are not the same thing)
 
 ### Modules
 
+**Inspect**:
+The module that looks up a Target's Resource context: the facts about it that
+cannot be read from the resource itself. It answers with the facts alone — a
+lookup it cannot make is reported and leaves that fact out, so a Rule testing it
+simply does not match and nothing that asks has an error to handle.
+_Avoid_: Enrich, gather, context (the Resource context is what it looks up, not
+what it is)
+
 **Decide**:
 The module that produces a Verdict for a Target. It reaches its conclusion from
 the Target, the configuration, and the current time — nothing else.
